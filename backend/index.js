@@ -148,18 +148,18 @@ async function importLogs() {
 
         // Extract email info
         if (service === 'postfix/qmgr') {
-          const fromMatch = content.match(/from=(?:<)?([^>,\s]*)(?:>)?/);
+          const fromMatch = content.match(/from=(?:<([^>]+)>|([^,\s]+))/);
           const sizeMatch = content.match(/size=(\d+)/);
-          if (fromMatch && fromMatch[1]) logsByMessageId[messageId].emailData.from = fromMatch[1];
+          if (fromMatch) logsByMessageId[messageId].emailData.from = fromMatch[1] || fromMatch[2];
           if (sizeMatch) logsByMessageId[messageId].emailData.size = parseInt(sizeMatch[1]);
         } else if (service === 'postfix/smtp') {
-          const toMatch = content.match(/to=(?:<)?([^>,\s]*)(?:>)?/);
+          const toMatch = content.match(/to=(?:<([^>]+)>|([^,\s]+))/);
           const relayMatch = content.match(/relay=([^\s,]+)/);
           const delayMatch = content.match(/delay=([\d.]+)/);
           const dsnMatch = content.match(/dsn=([\d.]+)/);
           const statusMatch = content.match(/status=(\w+)\s+\(([^)]*)\)/);
 
-          if (toMatch && toMatch[1]) logsByMessageId[messageId].emailData.to = toMatch[1];
+          if (toMatch) logsByMessageId[messageId].emailData.to = toMatch[1] || toMatch[2];
           if (relayMatch) logsByMessageId[messageId].emailData.relay = relayMatch[1];
           if (delayMatch) logsByMessageId[messageId].emailData.delay = parseFloat(delayMatch[1]);
           if (dsnMatch) logsByMessageId[messageId].emailData.dsn = dsnMatch[1];
