@@ -34,6 +34,8 @@ services:
       - DB_NAME=smtplog
       - TZ=Europe/Rome
       - NODE_ENV=production
+    volumes:
+      - /opt/postfix/postfix-logs:/app/logs
     ports:
       - "3000:3000"
     depends_on:

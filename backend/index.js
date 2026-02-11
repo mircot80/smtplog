@@ -150,6 +150,12 @@ async function importLogs() {
       entriesProcessed: insertedCount
     }, null, 2));
 
+    // Truncate log file after successful import
+    if (insertedCount > 0) {
+      await fs.truncate(LOG_FILE, 0);
+      console.log(`[${new Date().toISOString()}] Truncated log file`);
+    }
+
     console.log(`[${new Date().toISOString()}] Imported ${insertedCount} log entries`);
 
   } catch (error) {
