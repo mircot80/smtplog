@@ -24,6 +24,68 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+// Initialize database tables
+async function initializeDatabase() {
+  const connection = await pool.getConnection();
+  try {
+    console.log('[' + new Date().toISOString() + '] Initializing database tables...');
+    
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_date DATETIME NOT NULL,
+        timestamp_utc DATETIME NOT NULL,
+        hostname VARCHAR(255),
+        service VARCHAR(100),
+        process_id INT,
+        message_id VARCHAR(100) UNIQUE,
+        content TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_log_date (log_date),
+        INDEX idx_service (service),
+        INDEX idx_message_id (message_id)
+      )
+    `);
+
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS emails (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        message_id VARCHAR(100) UNIQUE,
+        log_date DATETIME NOT NULL,
+        sender VARCHAR(255),
+        recipient VARCHAR(255),
+        size INT,
+        relay VARCHAR(255),
+        delay DECIMAL(10, 2),
+        status VARCHAR(50),
+        dsn_code VARCHAR(20),
+        response_text TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_log_date (log_date),
+        INDEX idx_sender (sender),
+        INDEX idx_recipient (recipient),
+        INDEX idx_status (status)
+      )
+    `);
+
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS processed_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_file VARCHAR(255) NOT NULL,
+        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_file (log_file)
+      )
+    `);
+
+    console.log('[' + new Date().toISOString() + '] Database tables initialized successfully');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+    throw error;
+  } finally {
+    await connection.release();
+  }
+}
+
 // Import logs function (from log-importer.js logic)
 async function importLogs() {
   const connection = await pool.getConnection();
@@ -365,10 +427,15 @@ app.get('/api/health', (req, res) => {
 app.listen(port, () => {
   console.log(`Backend server running on port ${port}`);
   
-  // Initial import
-  setTimeout(() => {
-    console.log('Running initial import');
-    importLogs();
+  // Initialize database and then run initial import
+  setTimeout(async () => {
+    try {
+      await initializeDatabase();
+      console.log('Running initial import');
+      await importLogs();
+    } catch (error) {
+      console.error('Error during initialization:', error);
+    }
   }, 5000);
 });
 
