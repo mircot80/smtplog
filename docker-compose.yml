@@ -49,7 +49,7 @@ services:
     container_name: smtplog-frontend
     restart: always
     ports:
-      - "8080:80"
+      - "8081:80"
     depends_on:
       - backend
     networks:
