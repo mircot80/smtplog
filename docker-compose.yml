@@ -43,30 +43,6 @@ services:
     networks:
       - smtplog-network
 
-  backend:
-    build:
-      context: https://github.com/mircot80/smtplog.git#master:backend
-      dockerfile: Dockerfile
-    image: smtplog-backend:latest
-    container_name: smtplog-backend
-    restart: always
-    environment:
-      - DB_HOST=mariadb
-      - DB_PORT=3306
-      - DB_USER=smtplog_user
-      - DB_PASSWORD=smtplog_password
-      - DB_NAME=smtplog
-      - TZ=Europe/Rome
-      - NODE_ENV=production
-    volumes:
-      - /opt/postfix/postfix-logs:/app/logs
-    ports:
-      - "3000:3000"
-    depends_on:
-      - mariadb
-    networks:
-      - smtplog-network
-
   frontend:
     build:
       context: https://github.com/mircot80/smtplog.git#master:frontend
