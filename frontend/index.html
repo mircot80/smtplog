@@ -485,6 +485,17 @@
             return date.toLocaleString('it-IT');
         }
 
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
         function truncateText(text, length = 100) {
             return text.length > length ? text.substring(0, length) + '...' : text;
         }
@@ -691,8 +702,8 @@
                 return `
                     <tr>
                         <td>${formatDate(email.log_date)}</td>
-                        <td><code>${email.sender || '-'}</code></td>
-                        <td><code>${email.recipient || '-'}</code></td>
+                        <td><code>${escapeHtml(email.sender || '-')}</code></td>
+                        <td><code>${escapeHtml(email.recipient || '-')}</code></td>
                         <td>${email.relay || '-'}</td>
                         <td>${email.delay ? email.delay + 's' : '-'}</td>
                         <td><span class="${statusClass}">${statusText}</span></td>
