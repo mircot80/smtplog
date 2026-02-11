@@ -349,7 +349,7 @@ app.get('/api/stats', async (req, res) => {
 app.post('/api/import-logs', async (req, res) => {
   try {
     console.log('[' + new Date().toISOString() + '] Manual import requested');
-    importLogs();
+    await importLogs();
     res.json({ message: 'Import started successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
