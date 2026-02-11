@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+
+  postfix:
+    image: boky/postfix
+    container_name: postfix
+    restart: always
+    environment:
+      - ALLOW_EMPTY_SENDER=1
+      - ALLOWED_SENDER_DOMAINS=casarin.it
+      - SMTP_SERVER=posta.casarin.it
+      - RELAY_NETWORKS=192.168.0.0/24 192.168.131.0/24
+      - DKIM_SELECTOR=mail
+      - DKIM_KEY_LENGTH=2048
+      - DKIM_AUTOGENERATE=1
+      - DKIM_DOMAIN=casarin.it
+      - DKIM_PRIVATE_KEY=/etc/opendkim/keys/casarin.it/mail.private
+      - DKIM_KEY_FILE=/etc/opendkim/keys/casarin.it/mail.private
+      - DKIM_PUBLIC_KEY=/etc/opendkim/keys/casarin.it/mail.txt
+      - TZ=Europe/Rome
+      - POSTFIX_myhostname=posta.casarin.it
+      - POSTFIX_smtpd_banner=posta.casarin.it ESMTP
+      - POSTFIX_message_size_limit=37748736
+      - POSTFIX_maximal_queue_lifetime=1d
+      - POSTFIX_bounce_queue_lifetime=1d
+
+    healthcheck:
+      disable: true
+
+    volumes:
+      - /opt/postfix/opendkim:/etc/opendkim/keys
+      - /opt/postfix/postfix-rsyslog/10-mail.conf:/etc/rsyslog.d/10-mail.conf
+      - /opt/postfix/postfix-logs:/var/log
+      
+    ports:
+      - "25:25"
+    
+    networks:
+      - smtplog-network
+
+  mariadb:
+    image: mariadb:11
+    container_name: smtplog-mariadb
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=root_password
+      - MYSQL_DATABASE=smtplog
+      - MYSQL_USER=smtplog_user
+      - MYSQL_PASSWORD=smtplog_password
+      - TZ=Europe/Rome
+    volumes:
+      - mariadb-data:/var/lib/mysql
+      - /opt/postfix/db-init:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    networks:
+      - smtplog-network
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: smtplog-backend
+    restart: always
+    environment:
+      - DB_HOST=mariadb
+      - DB_PORT=3306
+      - DB_USER=smtplog_user
+      - DB_PASSWORD=smtplog_password
+      - DB_NAME=smtplog
+      - TZ=Europe/Rome
+      - NODE_ENV=production
+    volumes:
+      - /opt/postfix/postfix-logs:/app/logs:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mariadb
+    networks:
+      - smtplog-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: smtplog-frontend
+    restart: always
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - smtplog-network
+
+volumes:
+  mariadb-data:
+
+networks:
+  smtplog-network:
+    driver: bridge

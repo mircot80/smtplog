@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMTP Log Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e0e0e0;
+            background: #fafafa;
+        }
+
+        .tab-button {
+            padding: 15px 30px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab-button:hover {
+            color: #2c3e50;
+        }
+
+        .tab-button.active {
+            color: #2c3e50;
+            border-bottom-color: #3498db;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 20px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-card.success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+
+        .stat-card.danger {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 6px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group input,
+        .filter-group select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .filter-group input:focus,
+        .filter-group select:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #2980b9;
+        }
+
+        button.secondary {
+            background: #95a5a6;
+        }
+
+        button.secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        thead {
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+        }
+
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        tbody tr:hover {
+            background: #f9f9f9;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .pagination-info {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .pagination-controls button {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .pagination-controls button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .page-size-select {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+        }
+
+        .page-size-select select {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .status-sent {
+            color: #27ae60;
+            font-weight: 600;
+        }
+
+        .status-failed {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+
+        .status-pending {
+            color: #f39c12;
+            font-weight: 600;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .error {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .success {
+            background: #efe;
+            border: 1px solid #cfc;
+            color: #060;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .filters {
+                grid-template-columns: 1fr;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .pagination {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+
+            .table-wrapper {
+                font-size: 12px;
+            }
+
+            th, td {
+                padding: 8px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📧 SMTP Log Viewer</h1>
+        <p>Visualizza e gestisci i log del server SMTP</p>
+    </div>
+
+    <div class="container">
+        <div class="tabs">
+            <button class="tab-button active" onclick="switchTab('logs')">Tutti i Log</button>
+            <button class="tab-button" onclick="switchTab('emails')">Email Elaborate</button>
+        </div>
+
+        <!-- TAB 1: Tutti i Log -->
+        <div id="logs" class="tab-content active">
+            <div class="stats" id="statsContainer"></div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Data Da</label>
+                    <input type="date" id="logsDateFrom">
+                </div>
+                <div class="filter-group">
+                    <label>Data A</label>
+                    <input type="date" id="logsDateTo">
+                </div>
+                <div class="filter-group">
+                    <label>Ricerca</label>
+                    <input type="text" id="logsSearch" placeholder="Cerca nel log...">
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button onclick="searchLogs()">🔍 Cerca</button>
+                <button class="secondary" onclick="clearLogsFilters()">↺ Ripristina</button>
+            </div>
+
+            <div id="logsLoadingContainer" class="loading" style="display: none;">
+                Caricamento...
+            </div>
+
+            <div class="table-wrapper">
+                <table id="logsTable">
+                    <thead>
+                        <tr>
+                            <th>Data/Ora</th>
+                            <th>Host</th>
+                            <th>Servizio</th>
+                            <th>Messaggio</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logsTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <div class="pagination-info">
+                    Pagina <span id="logsCurrentPage">1</span> di <span id="logsMaxPages">1</span> 
+                    (<span id="logsTotalRecords">0</span> risultati)
+                </div>
+                <div class="pagination-controls">
+                    <button onclick="previousLogsPage()">← Precedente</button>
+                    <span id="logsPageNumbers"></span>
+                    <button onclick="nextLogsPage()">Successiva →</button>
+                </div>
+                <div class="page-size-select">
+                    <label>Righe per pagina:</label>
+                    <select id="logsPageSize" onchange="resetLogsPage(); searchLogs();">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: Email Elaborate -->
+        <div id="emails" class="tab-content">
+            <div class="filters">
+                <div class="filter-group">
+                    <label>Data Da</label>
+                    <input type="date" id="emailsDateFrom">
+                </div>
+                <div class="filter-group">
+                    <label>Data A</label>
+                    <input type="date" id="emailsDateTo">
+                </div>
+                <div class="filter-group">
+                    <label>Mittente</label>
+                    <input type="email" id="emailsSender" placeholder="es: user@domain.com">
+                </div>
+                <div class="filter-group">
+                    <label>Destinatario</label>
+                    <input type="email" id="emailsRecipient" placeholder="es: user@domain.com">
+                </div>
+                <div class="filter-group">
+                    <label>Ricerca Libera</label>
+                    <input type="text" id="emailsSearch" placeholder="Cerca...">
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button onclick="searchEmails()">🔍 Cerca</button>
+                <button class="secondary" onclick="clearEmailsFilters()">↺ Ripristina</button>
+            </div>
+
+            <div id="emailsLoadingContainer" class="loading" style="display: none;">
+                Caricamento...
+            </div>
+
+            <div class="table-wrapper">
+                <table id="emailsTable">
+                    <thead>
+                        <tr>
+                            <th>Data/Ora</th>
+                            <th>Mittente</th>
+                            <th>Destinatario</th>
+                            <th>Relè</th>
+                            <th>Ritardo</th>
+                            <th>Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody id="emailsTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="pagination">
+                <div class="pagination-info">
+                    Pagina <span id="emailsCurrentPage">1</span> di <span id="emailsMaxPages">1</span> 
+                    (<span id="emailsTotalRecords">0</span> risultati)
+                </div>
+                <div class="pagination-controls">
+                    <button onclick="previousEmailsPage()">← Precedente</button>
+                    <span id="emailsPageNumbers"></span>
+                    <button onclick="nextEmailsPage()">Successiva →</button>
+                </div>
+                <div class="page-size-select">
+                    <label>Righe per pagina:</label>
+                    <select id="emailsPageSize" onchange="resetEmailsPage(); searchEmails();">
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        let currentTab = 'logs';
+        let logsPage = 1;
+        let emailsPage = 1;
+
+        // Utility functions
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleString('it-IT');
+        }
+
+        function truncateText(text, length = 100) {
+            return text.length > length ? text.substring(0, length) + '...' : text;
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(tab).classList.add('active');
+            event.target.classList.add('active');
+
+            if (tab === 'logs') {
+                loadStats();
+                searchLogs();
+            } else if (tab === 'emails') {
+                searchEmails();
+            }
+        }
+
+        // Stats
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_URL}/stats`);
+                const stats = await response.json();
+
+                const statsHtml = `
+                    <div class="stat-card">
+                        <div class="stat-number">${stats.totalLogs}</div>
+                        <div class="stat-label">Log Totali</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">${stats.totalEmails}</div>
+                        <div class="stat-label">Email Elaborate</div>
+                    </div>
+                    <div class="stat-card success">
+                        <div class="stat-number">${stats.sentEmails}</div>
+                        <div class="stat-label">Email Inviate</div>
+                    </div>
+                    <div class="stat-card danger">
+                        <div class="stat-number">${stats.failedEmails}</div>
+                        <div class="stat-label">Email Fallite</div>
+                    </div>
+                `;
+
+                document.getElementById('statsContainer').innerHTML = statsHtml;
+            } catch (error) {
+                console.error('Errore nel caricamento delle statistiche:', error);
+            }
+        }
+
+        // Logs functions
+        function resetLogsPage() {
+            logsPage = 1;
+        }
+
+        function clearLogsFilters() {
+            document.getElementById('logsDateFrom').value = '';
+            document.getElementById('logsDateTo').value = '';
+            document.getElementById('logsSearch').value = '';
+            resetLogsPage();
+            searchLogs();
+        }
+
+        async function searchLogs() {
+            const page = logsPage;
+            const limit = document.getElementById('logsPageSize').value;
+            const dateFrom = document.getElementById('logsDateFrom').value;
+            const dateTo = document.getElementById('logsDateTo').value;
+            const search = document.getElementById('logsSearch').value;
+
+            showLoading(true);
+
+            try {
+                let url = `${API_URL}/logs?page=${page}&limit=${limit}`;
+                if (dateFrom) url += `&dateFrom=${dateFrom}`;
+                if (dateTo) url += `&dateTo=${dateTo}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                displayLogs(data.data);
+                updateLogsPagination(data.pagination);
+            } catch (error) {
+                console.error('Errore nella ricerca:', error);
+                document.getElementById('logsTableBody').innerHTML = 
+                    '<tr><td colspan="4" class="error">Errore nel caricamento dei dati</td></tr>';
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function displayLogs(logs) {
+            const tbody = document.getElementById('logsTableBody');
+            
+            if (logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">Nessun risultato trovato</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = logs.map(log => `
+                <tr>
+                    <td>${formatDate(log.log_date)}</td>
+                    <td><code>${log.hostname}</code></td>
+                    <td><code>${log.service}</code></td>
+                    <td title="${log.content}">${truncateText(log.content, 80)}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateLogsPagination(pagination) {
+            document.getElementById('logsCurrentPage').textContent = pagination.page;
+            document.getElementById('logsMaxPages').textContent = pagination.pages;
+            document.getElementById('logsTotalRecords').textContent = pagination.total;
+
+            // Update button states
+            document.querySelectorAll('#pagination-prev').forEach(el => {
+                el.disabled = pagination.page === 1;
+            });
+            document.querySelectorAll('#pagination-next').forEach(el => {
+                el.disabled = pagination.page === pagination.pages;
+            });
+        }
+
+        function previousLogsPage() {
+            if (logsPage > 1) {
+                logsPage--;
+                searchLogs();
+                window.scrollTo(0, 0);
+            }
+        }
+
+        function nextLogsPage() {
+            const maxPages = parseInt(document.getElementById('logsMaxPages').textContent);
+            if (logsPage < maxPages) {
+                logsPage++;
+                searchLogs();
+                window.scrollTo(0, 0);
+            }
+        }
+
+        // Emails functions
+        function resetEmailsPage() {
+            emailsPage = 1;
+        }
+
+        function clearEmailsFilters() {
+            document.getElementById('emailsDateFrom').value = '';
+            document.getElementById('emailsDateTo').value = '';
+            document.getElementById('emailsSender').value = '';
+            document.getElementById('emailsRecipient').value = '';
+            document.getElementById('emailsSearch').value = '';
+            resetEmailsPage();
+            searchEmails();
+        }
+
+        async function searchEmails() {
+            const page = emailsPage;
+            const limit = document.getElementById('emailsPageSize').value;
+            const dateFrom = document.getElementById('emailsDateFrom').value;
+            const dateTo = document.getElementById('emailsDateTo').value;
+            const sender = document.getElementById('emailsSender').value;
+            const recipient = document.getElementById('emailsRecipient').value;
+            const search = document.getElementById('emailsSearch').value;
+
+            showEmailsLoading(true);
+
+            try {
+                let url = `${API_URL}/emails?page=${page}&limit=${limit}`;
+                if (dateFrom) url += `&dateFrom=${dateFrom}`;
+                if (dateTo) url += `&dateTo=${dateTo}`;
+                if (sender) url += `&sender=${encodeURIComponent(sender)}`;
+                if (recipient) url += `&recipient=${encodeURIComponent(recipient)}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                displayEmails(data.data);
+                updateEmailsPagination(data.pagination);
+            } catch (error) {
+                console.error('Errore nella ricerca:', error);
+                document.getElementById('emailsTableBody').innerHTML = 
+                    '<tr><td colspan="6" class="error">Errore nel caricamento dei dati</td></tr>';
+            } finally {
+                showEmailsLoading(false);
+            }
+        }
+
+        function displayEmails(emails) {
+            const tbody = document.getElementById('emailsTableBody');
+            
+            if (emails.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">Nessun risultato trovato</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = emails.map(email => {
+                const statusClass = email.status === 'sent' ? 'status-sent' : 
+                                   (email.status ? 'status-failed' : 'status-pending');
+                const statusText = email.status || 'In sospeso';
+                
+                return `
+                    <tr>
+                        <td>${formatDate(email.log_date)}</td>
+                        <td><code>${email.sender || '-'}</code></td>
+                        <td><code>${email.recipient || '-'}</code></td>
+                        <td>${email.relay || '-'}</td>
+                        <td>${email.delay ? email.delay + 's' : '-'}</td>
+                        <td><span class="${statusClass}">${statusText}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateEmailsPagination(pagination) {
+            document.getElementById('emailsCurrentPage').textContent = pagination.page;
+            document.getElementById('emailsMaxPages').textContent = pagination.pages;
+            document.getElementById('emailsTotalRecords').textContent = pagination.total;
+        }
+
+        function previousEmailsPage() {
+            if (emailsPage > 1) {
+                emailsPage--;
+                searchEmails();
+                window.scrollTo(0, 0);
+            }
+        }
+
+        function nextEmailsPage() {
+            const maxPages = parseInt(document.getElementById('emailsMaxPages').textContent);
+            if (emailsPage < maxPages) {
+                emailsPage++;
+                searchEmails();
+                window.scrollTo(0, 0);
+            }
+        }
+
+        // Helper functions
+        function showLoading(show) {
+            document.getElementById('logsLoadingContainer').style.display = show ? 'block' : 'none';
+            if (!show) {
+                document.getElementById('logsTable').style.display = 'table';
+            } else {
+                document.getElementById('logsTable').style.display = 'none';
+            }
+        }
+
+        function showEmailsLoading(show) {
+            document.getElementById('emailsLoadingContainer').style.display = show ? 'block' : 'none';
+            if (!show) {
+                document.getElementById('emailsTable').style.display = 'table';
+            } else {
+                document.getElementById('emailsTable').style.display = 'none';
+            }
+        }
+
+        // Initial load
+        document.addEventListener('DOMContentLoaded', () => {
+            loadStats();
+            searchLogs();
+
+            // Auto-refresh stats every 30 seconds
+            setInterval(loadStats, 30000);
+        });
+    </script>
+</body>
+</html>
