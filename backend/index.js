@@ -5,6 +5,29 @@ const cron = require('node-cron');
 const fs = require('fs').promises;
 const path = require('path');
 
+/**
+ * SMTP Log Viewer - Backend Server
+ * 
+ * Parses Postfix/OpenDKIM SMTP logs and stores them in MariaDB
+ * Provides REST API for frontend to query logs and email statistics
+ * 
+ * Features:
+ * - Automatic log parsing (every hour via cron job)
+ * - Manual import trigger via API endpoint
+ * - Email tracking and statistics
+ * - Log file auto-cleanup (truncate after import)
+ * - Comprehensive error handling and logging
+ * 
+ * Environment Variables:
+ * - DB_HOST: Database host (default: localhost)
+ * - DB_PORT: Database port (default: 3306)
+ * - DB_USER: Database user (default: smtplog_user)
+ * - DB_PASSWORD: Database password
+ * - DB_NAME: Database name (default: smtplog)
+ * - PORT: Server port (default: 3000)
+ * - NODE_ENV: Environment (default: production)
+ */
+
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -86,156 +109,311 @@ async function initializeDatabase() {
   }
 }
 
-// Import logs function (from log-importer.js logic)
+// ============================================================================
+// LOG PARSING - Pre-compiled Regex Patterns
+// ============================================================================
+
+// Regex patterns compiled once for performance
+const REGEX_PATTERNS = {
+  // Format: 2026-02-11T09:26:24... hostname service[pid]: message
+  logLine: /^([^\s]+)\s+([^\s]+)\s+([^\s\[]+)\[(\d+)\]:\s+(.*)$/,
+  messageId: /^([A-F0-9]+):\s*/,
+  email: /(?:<([^>]+)>|([^,\s]+))/,
+  from: /from=(?:<([^>]+)>|([^,\s]+))/,
+  to: /to=(?:<([^>]+)>|([^,\s]+))/,
+  size: /size=(\d+)/,
+  relay: /relay=([^\s,]+)/,
+  delay: /delay=([\d.]+)/,
+  dsn: /dsn=([\d.]+)/,
+  status: /status=(\w+)\s+\(([^)]*)\)/
+};
+
+/**
+ * Parse a single log line
+ * @param {string} line - Raw log line
+ * @returns {Object|null} Parsed log or null if invalid
+ */
+function parseLogLine(line) {
+  if (!line.trim()) return null;
+  
+  const match = line.match(REGEX_PATTERNS.logLine);
+  if (!match) return null;
+
+  const [, timestamp, hostname, service, processId, content] = match;
+  
+  try {
+    return {
+      timestamp,
+      logDate: new Date(timestamp),
+      hostname,
+      service,
+      processId: parseInt(processId),
+      content
+    };
+  } catch (error) {
+    console.warn(`Failed to parse log line: ${line.substring(0, 80)}...`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Extract email data from postfix/qmgr log line
+ * @param {string} content - Log content
+ * @returns {Object} Email data object
+ */
+function extractQmgrData(content) {
+  const emailData = {};
+  
+  const fromMatch = content.match(REGEX_PATTERNS.from);
+  const sizeMatch = content.match(REGEX_PATTERNS.size);
+  
+  if (fromMatch) {
+    emailData.from = fromMatch[1] || fromMatch[2];
+  }
+  
+  if (sizeMatch) {
+    emailData.size = parseInt(sizeMatch[1]);
+  }
+  
+  return emailData;
+}
+
+/**
+ * Extract email data from postfix/smtp log line
+ * @param {string} content - Log content
+ * @returns {Object} Email data object
+ */
+function extractSmtpData(content) {
+  const emailData = {};
+  
+  const toMatch = content.match(REGEX_PATTERNS.to);
+  const relayMatch = content.match(REGEX_PATTERNS.relay);
+  const delayMatch = content.match(REGEX_PATTERNS.delay);
+  const dsnMatch = content.match(REGEX_PATTERNS.dsn);
+  const statusMatch = content.match(REGEX_PATTERNS.status);
+  
+  if (toMatch) {
+    emailData.to = toMatch[1] || toMatch[2];
+  }
+  
+  if (relayMatch) {
+    emailData.relay = relayMatch[1];
+  }
+  
+  if (delayMatch) {
+    emailData.delay = parseFloat(delayMatch[1]);
+  }
+  
+  if (dsnMatch) {
+    emailData.dsn = dsnMatch[1];
+  }
+  
+  if (statusMatch) {
+    emailData.status = statusMatch[1];
+    emailData.response = statusMatch[2];
+  }
+  
+  return emailData;
+}
+
+/**
+ * Extract message ID from log content
+ * @param {string} content - Log content
+ * @returns {string|null} Message ID or null
+ */
+function extractMessageId(content) {
+  const match = content.match(REGEX_PATTERNS.messageId);
+  return match ? match[1] : null;
+}
+
+// ============================================================================
+// LOG IMPORT FUNCTION
+// ============================================================================
+
+/**
+ * Import logs from mail.log file into database
+ * Parses new logs, inserts them, and cleans up the log file
+ */
 async function importLogs() {
   const connection = await pool.getConnection();
   try {
-    console.log(`[${new Date().toISOString()}] Starting log import`);
+    const startTime = new Date();
+    console.log(`[${startTime.toISOString()}] Starting log import`);
 
     const LOG_FILE = '/app/logs/mail.log';
     const STATE_FILE = '/app/data/log_state.json';
 
+    // Read previous state
     let state = { lineIndex: 0 };
     try {
       const stateData = await fs.readFile(STATE_FILE, 'utf-8');
       state = JSON.parse(stateData);
     } catch (e) {
-      // File doesn't exist
+      console.log(`[${new Date().toISOString()}] State file not found, starting from beginning`);
     }
 
-    const fileContent = await fs.readFile(LOG_FILE, 'utf-8');
+    // Read log file
+    let fileContent;
+    try {
+      fileContent = await fs.readFile(LOG_FILE, 'utf-8');
+    } catch (error) {
+      console.warn(`[${new Date().toISOString()}] Log file not found: ${LOG_FILE}`);
+      return;
+    }
+
     const lines = fileContent.split('\n');
     const newLines = lines.slice(state.lineIndex || 0);
 
     if (newLines.length === 0) {
-      console.log('No new logs to process');
+      console.log(`[${new Date().toISOString()}] No new logs to process`);
       return;
     }
 
     const logsByMessageId = {};
     let insertedCount = 0;
+    let parseErrors = 0;
 
     // Parse and insert logs
     for (const line of newLines) {
-      if (!line.trim()) continue;
+      const parsed = parseLogLine(line);
+      if (!parsed) continue;
 
-      const regex = /^([^\s]+)\s+([^\s]+)\s+([^\s\[]+)\[(\d+)\]:\s+(.*)$/;
-      const match = line.match(regex);
-      
-      if (!match) continue;
+      try {
+        // Insert into logs table
+        await connection.execute(
+          `INSERT IGNORE INTO logs (log_date, timestamp_utc, hostname, service, process_id, content)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [parsed.logDate, parsed.logDate, parsed.hostname, parsed.service, parsed.processId, parsed.content]
+        );
+        insertedCount++;
 
-      const [, timestamp, hostname, service, processId, content] = match;
-      const logDate = new Date(timestamp);
+        // Extract message ID for email tracking
+        const messageId = extractMessageId(parsed.content);
+        if (messageId) {
+          if (!logsByMessageId[messageId]) {
+            logsByMessageId[messageId] = {
+              messageId,
+              timestamp: parsed.logDate,
+              emailData: {}
+            };
+          }
 
-      await connection.execute(
-        `INSERT IGNORE INTO logs (log_date, timestamp_utc, hostname, service, process_id, content)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [logDate, logDate, hostname, service, parseInt(processId), content]
-      );
-      insertedCount++;
-
-      // Extract message ID
-      const msgIdMatch = content.match(/^([A-F0-9]+):\s*/);
-      if (msgIdMatch) {
-        const messageId = msgIdMatch[1];
-        if (!logsByMessageId[messageId]) {
-          logsByMessageId[messageId] = {
-            messageId,
-            timestamp: logDate,
-            emailData: {}
-          };
-        }
-
-        // Extract email info
-        if (service === 'postfix/qmgr') {
-          const fromMatch = content.match(/from=(?:<([^>]+)>|([^,\s]+))/);
-          const sizeMatch = content.match(/size=(\d+)/);
-          if (fromMatch) logsByMessageId[messageId].emailData.from = fromMatch[1] || fromMatch[2];
-          if (sizeMatch) logsByMessageId[messageId].emailData.size = parseInt(sizeMatch[1]);
-        } else if (service === 'postfix/smtp') {
-          const toMatch = content.match(/to=(?:<([^>]+)>|([^,\s]+))/);
-          const relayMatch = content.match(/relay=([^\s,]+)/);
-          const delayMatch = content.match(/delay=([\d.]+)/);
-          const dsnMatch = content.match(/dsn=([\d.]+)/);
-          const statusMatch = content.match(/status=(\w+)\s+\(([^)]*)\)/);
-
-          if (toMatch) logsByMessageId[messageId].emailData.to = toMatch[1] || toMatch[2];
-          if (relayMatch) logsByMessageId[messageId].emailData.relay = relayMatch[1];
-          if (delayMatch) logsByMessageId[messageId].emailData.delay = parseFloat(delayMatch[1]);
-          if (dsnMatch) logsByMessageId[messageId].emailData.dsn = dsnMatch[1];
-          if (statusMatch) {
-            logsByMessageId[messageId].emailData.status = statusMatch[1];
-            logsByMessageId[messageId].emailData.response = statusMatch[2];
+          // Extract service-specific email data
+          if (parsed.service === 'postfix/qmgr') {
+            logsByMessageId[messageId].emailData = {
+              ...logsByMessageId[messageId].emailData,
+              ...extractQmgrData(parsed.content)
+            };
+          } else if (parsed.service === 'postfix/smtp') {
+            logsByMessageId[messageId].emailData = {
+              ...logsByMessageId[messageId].emailData,
+              ...extractSmtpData(parsed.content)
+            };
           }
         }
+      } catch (error) {
+        parseErrors++;
+        console.error(`[${new Date().toISOString()}] Error processing log line:`, error.message);
       }
     }
 
     // Insert email records
+    let emailInsertedCount = 0;
     for (const [messageId, data] of Object.entries(logsByMessageId)) {
       const emailData = data.emailData;
       if (emailData.to || emailData.from) {
-        await connection.execute(
-          `INSERT INTO emails (message_id, log_date, sender, recipient, size, relay, delay, status, dsn_code, response_text)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE 
-             sender = COALESCE(VALUES(sender), sender),
-             recipient = COALESCE(VALUES(recipient), recipient),
-             size = COALESCE(VALUES(size), size),
-             relay = COALESCE(VALUES(relay), relay),
-             delay = COALESCE(VALUES(delay), delay),
-             status = COALESCE(VALUES(status), status),
-             dsn_code = COALESCE(VALUES(dsn_code), dsn_code),
-             response_text = COALESCE(VALUES(response_text), response_text)`,
-          [
-            messageId,
-            data.timestamp,
-            emailData.from || null,
-            emailData.to || null,
-            emailData.size || null,
-            emailData.relay || null,
-            emailData.delay || null,
-            emailData.status || null,
-            emailData.dsn || null,
-            emailData.response || null
-          ]
-        );
+        try {
+          await connection.execute(
+            `INSERT INTO emails (message_id, log_date, sender, recipient, size, relay, delay, status, dsn_code, response_text)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+               sender = COALESCE(VALUES(sender), sender),
+               recipient = COALESCE(VALUES(recipient), recipient),
+               size = COALESCE(VALUES(size), size),
+               relay = COALESCE(VALUES(relay), relay),
+               delay = COALESCE(VALUES(delay), delay),
+               status = COALESCE(VALUES(status), status),
+               dsn_code = COALESCE(VALUES(dsn_code), dsn_code),
+               response_text = COALESCE(VALUES(response_text), response_text)`,
+            [
+              messageId,
+              data.timestamp,
+              emailData.from || null,
+              emailData.to || null,
+              emailData.size || null,
+              emailData.relay || null,
+              emailData.delay || null,
+              emailData.status || null,
+              emailData.dsn || null,
+              emailData.response || null
+            ]
+          );
+          emailInsertedCount++;
+        } catch (error) {
+          console.error(`[${new Date().toISOString()}] Error inserting email record:`, error.message);
+        }
       }
     }
 
-    // Update state
-    const stateDir = path.dirname(STATE_FILE);
-    await fs.mkdir(stateDir, { recursive: true });
-    await fs.writeFile(STATE_FILE, JSON.stringify({
-      lineIndex: lines.length,
-      lastProcessed: new Date().toISOString(),
-      entriesProcessed: insertedCount
-    }, null, 2));
-
-    // Truncate log file after successful import
-    if (insertedCount > 0) {
-      await fs.truncate(LOG_FILE, 0);
-      console.log(`[${new Date().toISOString()}] Truncated log file`);
+    // Update state file
+    try {
+      const stateDir = path.dirname(STATE_FILE);
+      await fs.mkdir(stateDir, { recursive: true });
+      await fs.writeFile(STATE_FILE, JSON.stringify({
+        lineIndex: lines.length,
+        lastProcessed: new Date().toISOString(),
+        logsInserted: insertedCount,
+        emailsInserted: emailInsertedCount,
+        parseErrors
+      }, null, 2));
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error updating state file:`, error.message);
     }
 
-    console.log(`[${new Date().toISOString()}] Imported ${insertedCount} log entries`);
+    // Truncate log file after successful import
+    try {
+      if (insertedCount > 0) {
+        await fs.truncate(LOG_FILE, 0);
+        console.log(`[${new Date().toISOString()}] Log file truncated`);
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error truncating log file:`, error.message);
+    }
+
+    const duration = new Date() - startTime;
+    console.log(`[${new Date().toISOString()}] Import completed: ${insertedCount} logs, ${emailInsertedCount} emails (${duration}ms, ${parseErrors} errors)`);
 
   } catch (error) {
-    console.error('Error importing logs:', error);
+    console.error(`[${new Date().toISOString()}] Critical error during import:`, error);
   } finally {
     await connection.release();
   }
 }
 
+// ============================================================================
+// SCHEDULED JOBS
+// ============================================================================
+
 // Cron job - every hour
 cron.schedule('0 * * * *', () => {
-  console.log('Running scheduled import');
+  console.log(`[${new Date().toISOString()}] Scheduled import job triggered (every hour)`);
   importLogs();
 });
 
-// API Routes
+// ============================================================================
+// REST API ENDPOINTS
+// ============================================================================
 
-// Get all logs with filters
+/**
+ * GET /api/logs
+ * Retrieve all logs with optional filters and pagination
+ * Query parameters:
+ *   - page: Current page (default: 1)
+ *   - limit: Records per page (default: 100)
+ *   - dateFrom: Filter by start date (ISO format)
+ *   - dateTo: Filter by end date (ISO format)
+ *   - search: Search in log content
+ */
 app.get('/api/logs', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -246,6 +424,7 @@ app.get('/api/logs', async (req, res) => {
     const dateTo = req.query.dateTo ? new Date(req.query.dateTo) : null;
     const searchText = req.query.search || '';
 
+    // Build dynamic query based on filters
     let query = 'SELECT * FROM logs WHERE 1=1';
     let countQuery = 'SELECT COUNT(*) as total FROM logs WHERE 1=1';
     const params = [];
@@ -291,7 +470,8 @@ app.get('/api/logs', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(`[${new Date().toISOString()}] Error fetching logs:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch logs' });
   }
 });
 
@@ -308,6 +488,7 @@ app.get('/api/emails', async (req, res) => {
     const recipient = req.query.recipient || '';
     const searchText = req.query.search || '';
 
+    // Build dynamic query based on filters
     let query = 'SELECT * FROM emails WHERE 1=1';
     let countQuery = 'SELECT COUNT(*) as total FROM emails WHERE 1=1';
     const params = [];
@@ -369,11 +550,15 @@ app.get('/api/emails', async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(`[${new Date().toISOString()}] Error fetching emails:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch emails' });
   }
 });
 
-// Get statistics
+/**
+ * GET /api/stats
+ * Get aggregated statistics about logs and emails
+ */
 app.get('/api/stats', async (req, res) => {
   try {
     const connection = await pool.getConnection();
@@ -403,46 +588,90 @@ app.get('/api/stats', async (req, res) => {
       failedEmails
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(`[${new Date().toISOString()}] Error fetching stats:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch statistics' });
   }
 });
 
-// Force import logs
+/**
+ * POST /api/import-logs
+ * Manually trigger log import (runs asynchronously)
+ */
 app.post('/api/import-logs', async (req, res) => {
   try {
-    console.log('[' + new Date().toISOString() + '] Manual import requested');
+    console.log(`[${new Date().toISOString()}] Manual import requested`);
     await importLogs();
-    res.json({ message: 'Import started successfully' });
+    res.json({ message: 'Import completed successfully' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(`[${new Date().toISOString()}] Error during manual import:`, error.message);
+    res.status(500).json({ error: 'Failed to import logs' });
   }
 });
 
-// Health check
+/**
+ * GET /api/health
+ * Health check endpoint
+ */
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Start server
+// ============================================================================
+// SERVER STARTUP & SHUTDOWN
+// ============================================================================
+
+// ============================================================================
+// SERVER STARTUP & SHUTDOWN
+// ============================================================================
+
+/**
+ * Start the Express server and initialize the application
+ * 1. Initialize database tables
+ * 2. Run initial log import
+ * 3. Start listening for requests
+ */
 app.listen(port, () => {
-  console.log(`Backend server running on port ${port}`);
+  console.log(`[${new Date().toISOString()}] Backend server running on port ${port}`);
   
-  // Initialize database and then run initial import
+  // Wait 5 seconds for database to be ready, then initialize
   setTimeout(async () => {
     try {
+      console.log(`[${new Date().toISOString()}] Initializing application...`);
       await initializeDatabase();
-      console.log('Running initial import');
+      console.log(`[${new Date().toISOString()}] Running initial import`);
       await importLogs();
+      console.log(`[${new Date().toISOString()}] Application initialized successfully`);
     } catch (error) {
-      console.error('Error during initialization:', error);
+      console.error(`[${new Date().toISOString()}] Critical error during initialization:`, error.message);
+      console.error(error.stack);
     }
   }, 5000);
 });
 
-// Graceful shutdown
+/**
+ * Graceful shutdown
+ * Close database connections and exit cleanly when receiving SIGTERM signal
+ */
 process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing...');
-  pool.end(() => {
-    process.exit(0);
+  console.log(`[${new Date().toISOString()}] SIGTERM signal received: closing gracefully`);
+  pool.end((err) => {
+    if (err) {
+      console.error(`[${new Date().toISOString()}] Error closing database pool:`, err.message);
+      process.exit(1);
+    } else {
+      console.log(`[${new Date().toISOString()}] Database connections closed`);
+      process.exit(0);
+    }
   });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  console.error(`[${new Date().toISOString()}] Uncaught Exception:`, error);
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error(`[${new Date().toISOString()}] Unhandled Rejection at:`, promise, 'reason:', reason);
 });
