@@ -2,43 +2,6 @@ version: '3.8'
 
 services:
 
-  postfix:
-    image: boky/postfix
-    container_name: postfix
-    restart: always
-    environment:
-      - ALLOW_EMPTY_SENDER=1
-      - ALLOWED_SENDER_DOMAINS=casarin.it
-      - SMTP_SERVER=posta.casarin.it
-      - RELAY_NETWORKS=192.168.0.0/24 192.168.131.0/24
-      - DKIM_SELECTOR=mail
-      - DKIM_KEY_LENGTH=2048
-      - DKIM_AUTOGENERATE=1
-      - DKIM_DOMAIN=casarin.it
-      - DKIM_PRIVATE_KEY=/etc/opendkim/keys/casarin.it/mail.private
-      - DKIM_KEY_FILE=/etc/opendkim/keys/casarin.it/mail.private
-      - DKIM_PUBLIC_KEY=/etc/opendkim/keys/casarin.it/mail.txt
-      - TZ=Europe/Rome
-      - POSTFIX_myhostname=posta.casarin.it
-      - POSTFIX_smtpd_banner=posta.casarin.it ESMTP
-      - POSTFIX_message_size_limit=37748736
-      - POSTFIX_maximal_queue_lifetime=1d
-      - POSTFIX_bounce_queue_lifetime=1d
-
-    healthcheck:
-      disable: true
-
-    volumes:
-      - /opt/postfix/opendkim:/etc/opendkim/keys
-      - /opt/postfix/postfix-rsyslog/10-mail.conf:/etc/rsyslog.d/10-mail.conf
-      - /opt/postfix/postfix-logs:/var/log
-      
-    ports:
-      - "25:25"
-    
-    networks:
-      - smtplog-network
-
   mariadb:
     image: mariadb:11
     container_name: smtplog-mariadb
@@ -51,7 +14,6 @@ services:
       - TZ=Europe/Rome
     volumes:
       - mariadb-data:/var/lib/mysql
-      - /opt/postfix/db-init:/docker-entrypoint-initdb.d
     ports:
       - "3306:3306"
     networks:
@@ -59,8 +21,9 @@ services:
 
   backend:
     build:
-      context: ../backend
+      context: https://github.com/mircot80/smtplog.git#master:backend
       dockerfile: Dockerfile
+    image: smtplog-backend:latest
     container_name: smtplog-backend
     restart: always
     environment:
@@ -71,8 +34,6 @@ services:
       - DB_NAME=smtplog
       - TZ=Europe/Rome
       - NODE_ENV=production
-    volumes:
-      - /opt/postfix/postfix-logs:/app/logs:ro
     ports:
       - "3000:3000"
     depends_on:
@@ -82,8 +43,9 @@ services:
 
   frontend:
     build:
-      context: ../frontend
+      context: https://github.com/mircot80/smtplog.git#master:frontend
       dockerfile: Dockerfile
+    image: smtplog-frontend:latest
     container_name: smtplog-frontend
     restart: always
     ports:
