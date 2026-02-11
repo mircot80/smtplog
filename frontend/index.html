@@ -591,7 +591,7 @@
                     <td>${formatDate(log.log_date)}</td>
                     <td><code>${log.hostname}</code></td>
                     <td><code>${log.service}</code></td>
-                    <td title="${log.content}">${truncateText(log.content, 80)}</td>
+                    <td title="${log.content}">${truncateText(log.content, 200)}</td>
                 </tr>
             `).join('');
         }
