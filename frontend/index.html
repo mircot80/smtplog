@@ -355,6 +355,7 @@
             <div class="button-group">
                 <button onclick="searchLogs()">🔍 Cerca</button>
                 <button class="secondary" onclick="clearLogsFilters()">↺ Ripristina</button>
+                <button class="secondary" onclick="forceImport()">⬇️ Importa adesso</button>
             </div>
 
             <div id="logsLoadingContainer" class="loading" style="display: none;">
@@ -739,6 +740,42 @@
                 document.getElementById('emailsTable').style.display = 'table';
             } else {
                 document.getElementById('emailsTable').style.display = 'none';
+            }
+        }
+
+        async function forceImport() {
+            try {
+                const button = event.target;
+                button.disabled = true;
+                button.textContent = '⏳ Importazione in corso...';
+
+                const response = await fetch(`${API_URL}/import-logs`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert('✅ Import avviato! I dati verranno aggiornati tra pochi secondi.');
+                    
+                    // Reload stats and logs after 3 seconds
+                    setTimeout(() => {
+                        loadStats();
+                        searchLogs();
+                    }, 3000);
+                } else {
+                    alert('❌ Errore: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Errore nell\'import:', error);
+                alert('❌ Errore nel forzare l\'importazione');
+            } finally {
+                const button = event.target;
+                button.disabled = false;
+                button.textContent = '⬇️ Importa adesso';
             }
         }
 

@@ -345,6 +345,17 @@ app.get('/api/stats', async (req, res) => {
   }
 });
 
+// Force import logs
+app.post('/api/import-logs', async (req, res) => {
+  try {
+    console.log('[' + new Date().toISOString() + '] Manual import requested');
+    importLogs();
+    res.json({ message: 'Import started successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
