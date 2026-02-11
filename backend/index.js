@@ -277,7 +277,7 @@ app.get('/api/logs', async (req, res) => {
     params.push(limit, offset);
 
     const connection = await pool.getConnection();
-    const [[logs]] = await connection.query(query, params);
+    const [logs] = await connection.query(query, params);
     const [[{ total }]] = await connection.query(countQuery, countParams);
     await connection.release();
 
@@ -355,7 +355,7 @@ app.get('/api/emails', async (req, res) => {
     params.push(limit, offset);
 
     const connection = await pool.getConnection();
-    const [[emails]] = await connection.query(query, params);
+    const [emails] = await connection.query(query, params);
     const [[{ total }]] = await connection.query(countQuery, countParams);
     await connection.release();
 
