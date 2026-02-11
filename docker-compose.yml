@@ -24,6 +24,7 @@ services:
       context: https://github.com/mircot80/smtplog.git#master:backend
       dockerfile: Dockerfile
     image: smtplog-backend:latest
+    pull_policy: never
     container_name: smtplog-backend
     restart: always
     environment:
@@ -48,6 +49,7 @@ services:
       context: https://github.com/mircot80/smtplog.git#master:frontend
       dockerfile: Dockerfile
     image: smtplog-frontend:latest
+    pull_policy: never
     container_name: smtplog-frontend
     restart: always
     ports:
