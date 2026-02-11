@@ -600,9 +600,9 @@
             tbody.innerHTML = logs.map(log => `
                 <tr>
                     <td>${formatDate(log.log_date)}</td>
-                    <td><code>${log.hostname}</code></td>
-                    <td><code>${log.service}</code></td>
-                    <td title="${log.content}">${truncateText(log.content, 200)}</td>
+                    <td><code>${escapeHtml(log.hostname)}</code></td>
+                    <td><code>${escapeHtml(log.service)}</code></td>
+                    <td title="${escapeHtml(log.content)}">${escapeHtml(truncateText(log.content, 200))}</td>
                 </tr>
             `).join('');
         }
