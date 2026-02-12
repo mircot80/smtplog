@@ -292,6 +292,71 @@
             margin-bottom: 20px;
         }
 
+        .log-console {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            margin-bottom: 20px;
+            display: none;
+            line-height: 1.5;
+        }
+
+        .log-console.active {
+            display: block;
+        }
+
+        .log-line {
+            padding: 2px 0;
+            word-break: break-all;
+        }
+
+        .log-line.error {
+            color: #f48771;
+        }
+
+        .log-line.success {
+            color: #89d185;
+        }
+
+        .log-line.info {
+            color: #75beff;
+        }
+
+        .log-console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #444;
+        }
+
+        .log-console-header h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #4fc3f7;
+        }
+
+        .log-console-clear {
+            background: #7f8c8d;
+            padding: 4px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 11px;
+            border: none;
+            color: white;
+        }
+
+        .log-console-clear:hover {
+            background: #5d6d7b;
+        }
+
         @media (max-width: 768px) {
             .filters {
                 grid-template-columns: 1fr;
@@ -317,6 +382,10 @@
 
             .header h1 {
                 font-size: 20px;
+            }
+
+            .log-console {
+                max-height: 250px;
             }
         }
     </style>
@@ -356,6 +425,14 @@
                 <button onclick="searchLogs()">🔍 Cerca</button>
                 <button class="secondary" onclick="clearLogsFilters()">↺ Ripristina</button>
                 <button class="secondary" onclick="forceImport()">⬇️ Importa adesso</button>
+            </div>
+
+            <div id="logConsole" class="log-console">
+                <div class="log-console-header">
+                    <h3>📋 Log Importazione</h3>
+                    <button class="log-console-clear" onclick="clearLogConsole()">Pulisci</button>
+                </div>
+                <div id="logConsoleContent"></div>
             </div>
 
             <div id="logsLoadingContainer" class="loading" style="display: none;">
@@ -760,6 +837,18 @@
                 button.disabled = true;
                 button.textContent = '⏳ Importazione in corso...';
 
+                // Clear and show log console
+                clearLogConsole();
+                const logConsole = document.getElementById('logConsole');
+                logConsole.classList.add('active');
+
+                // Aggiungi log iniziale
+                addLogLine('Inizio importazione...', 'info');
+
+                // Connect to SSE stream
+                const eventSource = new EventSource(`${API_URL}/import-logs/stream`);
+
+                // Start import
                 const response = await fetch(`${API_URL}/import-logs`, {
                     method: 'POST',
                     headers: {
@@ -769,25 +858,51 @@
 
                 const data = await response.json();
 
-                if (response.ok) {
-                    alert('✅ Import avviato! I dati verranno aggiornati tra pochi secondi.');
+                // Listen for logs
+                eventSource.onmessage = (event) => {
+                    const logEntry = event.data;
+                    addLogLine(logEntry, 'info');
+                };
+
+                eventSource.onerror = () => {
+                    addLogLine('Importazione completata!', 'success');
+                    eventSource.close();
                     
-                    // Reload stats and logs after 3 seconds
+                    // Reload stats and logs after 2 seconds
                     setTimeout(() => {
                         loadStats();
                         searchLogs();
-                    }, 3000);
-                } else {
-                    alert('❌ Errore: ' + data.error);
+                    }, 2000);
+                };
+
+                if (!response.ok) {
+                    addLogLine('❌ Errore: ' + data.error, 'error');
+                    eventSource.close();
                 }
             } catch (error) {
                 console.error('Errore nell\'import:', error);
-                alert('❌ Errore nel forzare l\'importazione');
+                addLogLine('❌ Errore: ' + error.message, 'error');
             } finally {
                 const button = event.target;
                 button.disabled = false;
                 button.textContent = '⬇️ Importa adesso';
             }
+        }
+
+        function clearLogConsole() {
+            document.getElementById('logConsoleContent').innerHTML = '';
+        }
+
+        function addLogLine(message, type = 'info') {
+            const content = document.getElementById('logConsoleContent');
+            const line = document.createElement('div');
+            line.className = `log-line ${type}`;
+            line.textContent = message;
+            content.appendChild(line);
+            
+            // Auto-scroll to bottom
+            const console = document.getElementById('logConsole');
+            console.scrollTop = console.scrollHeight;
         }
 
         // Initial load

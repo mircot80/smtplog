@@ -47,6 +47,54 @@ const pool = mysql.createPool({
   queueLimit: 0,
 });
 
+// ============================================================================
+// LOG STREAMING - Server-Sent Events
+// ============================================================================
+
+let sseClients = [];
+let importInProgress = false;
+
+/**
+ * Add an SSE client to receive log updates
+ */
+function addSSEClient(res) {
+  sseClients.push(res);
+  // Remove client when connection closes
+  res.on('close', () => {
+    sseClients = sseClients.filter(client => client !== res);
+  });
+}
+
+/**
+ * Broadcast a log message to all connected SSE clients
+ */
+function broadcastLog(message) {
+  sseClients.forEach(client => {
+    try {
+      client.write(`data: ${message}\n\n`);
+    } catch (e) {
+      // Client connection closed, will be removed on close event
+    }
+  });
+}
+
+/**
+ * Override console.log to broadcast logs to SSE clients
+ */
+const originalConsoleLog = console.log;
+console.log = function(...args) {
+  const message = args.map(arg => 
+    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+  ).join(' ');
+  
+  originalConsoleLog.apply(console, args);
+  
+  // Only broadcast if import is in progress
+  if (importInProgress) {
+    broadcastLog(message);
+  }
+};
+
 // Initialize database tables
 async function initializeDatabase() {
   const connection = await pool.getConnection();
@@ -235,6 +283,7 @@ function extractMessageId(content) {
  * Parses new logs, inserts them, and cleans up the log file
  */
 async function importLogs() {
+  importInProgress = true;
   const connection = await pool.getConnection();
   try {
     const startTime = new Date();
@@ -412,6 +461,7 @@ async function importLogs() {
     console.error(`[${new Date().toISOString()}] Critical error during import:`, error);
   } finally {
     await connection.release();
+    importInProgress = false;
   }
 }
 
@@ -616,6 +666,24 @@ app.get('/api/stats', async (req, res) => {
     console.error(`[${new Date().toISOString()}] Error fetching stats:`, error.message);
     res.status(500).json({ error: 'Failed to fetch statistics' });
   }
+});
+
+/**
+ * GET /api/import-logs/stream
+ * Server-Sent Events stream for real-time log updates during import
+ */
+app.get('/api/import-logs/stream', (req, res) => {
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  // Add client to list
+  addSSEClient(res);
+
+  // Send initial message
+  res.write('data: Connesso al log stream\n\n');
 });
 
 /**
