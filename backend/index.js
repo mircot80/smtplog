@@ -633,25 +633,59 @@ app.get('/api/emails', async (req, res) => {
 /**
  * GET /api/stats
  * Get aggregated statistics about logs and emails
+ * Query parameters:
+ *   - today: If "true", filter by current date only
  */
 app.get('/api/stats', async (req, res) => {
   try {
     const connection = await pool.getConnection();
+    const today = req.query.today === 'true';
+
+    // Build date filter if today is requested
+    let dateFilter = '';
+    let dateParams = [];
+    if (today) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      dateFilter = ' WHERE log_date >= ? AND log_date <= ?';
+      dateParams = [startOfDay, endOfDay];
+    }
 
     const [[{ totalLogs }]] = await connection.query(
-      'SELECT COUNT(*) as totalLogs FROM logs'
+      `SELECT COUNT(*) as totalLogs FROM logs${dateFilter}`,
+      dateParams
     );
 
     const [[{ totalEmails }]] = await connection.query(
-      'SELECT COUNT(*) as totalEmails FROM emails'
+      `SELECT COUNT(*) as totalEmails FROM emails${dateFilter}`,
+      dateParams
     );
 
+    // For sent emails, need to combine WHERE conditions
+    let sentFilter = ' WHERE status = \'sent\'';
+    let sentParams = [];
+    if (today) {
+      sentFilter += ' AND log_date >= ? AND log_date <= ?';
+      sentParams = dateParams;
+    }
     const [[{ sentEmails }]] = await connection.query(
-      "SELECT COUNT(*) as sentEmails FROM emails WHERE status = 'sent'"
+      `SELECT COUNT(*) as sentEmails FROM emails${sentFilter}`,
+      sentParams
     );
 
+    // For failed emails, need to combine WHERE conditions
+    let failedFilter = ' WHERE status != \'sent\' AND status IS NOT NULL';
+    let failedParams = [];
+    if (today) {
+      failedFilter += ' AND log_date >= ? AND log_date <= ?';
+      failedParams = dateParams;
+    }
     const [[{ failedEmails }]] = await connection.query(
-      "SELECT COUNT(*) as failedEmails FROM emails WHERE status != 'sent' AND status IS NOT NULL"
+      `SELECT COUNT(*) as failedEmails FROM emails${failedFilter}`,
+      failedParams
     );
 
     await connection.release();

@@ -596,25 +596,25 @@
         // Stats
         async function loadStats() {
             try {
-                const response = await fetch(`${API_URL}/stats`);
+                const response = await fetch(`${API_URL}/stats?today=true`);
                 const stats = await response.json();
 
                 const statsHtml = `
                     <div class="stat-card">
                         <div class="stat-number">${stats.totalLogs}</div>
-                        <div class="stat-label">Log Totali</div>
+                        <div class="stat-label">Log Totali (Oggi)</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-number">${stats.totalEmails}</div>
-                        <div class="stat-label">Email Elaborate</div>
+                        <div class="stat-label">Email Elaborate (Oggi)</div>
                     </div>
                     <div class="stat-card success">
                         <div class="stat-number">${stats.sentEmails}</div>
-                        <div class="stat-label">Email Inviate</div>
+                        <div class="stat-label">Email Inviate (Oggi)</div>
                     </div>
                     <div class="stat-card danger">
                         <div class="stat-number">${stats.failedEmails}</div>
-                        <div class="stat-label">Email Fallite</div>
+                        <div class="stat-label">Email Fallite (Oggi)</div>
                     </div>
                 `;
 
