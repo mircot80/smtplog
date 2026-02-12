@@ -761,6 +761,92 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+/**
+ * GET /api/queue
+ * Get Postfix queue information
+ */
+app.get('/api/queue', async (req, res) => {
+  try {
+    const { execSync } = require('child_process');
+    
+    // Try to read queue using postqueue command (works if Postfix is accessible)
+    let queueData = [];
+    let queueStats = {
+      total: 0,
+      deferred: 0,
+      active: 0,
+      maildir: 0
+    };
+
+    try {
+      // Try to execute postqueue -p
+      const queueOutput = execSync('postqueue -p 2>/dev/null || echo "unavailable"', { 
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'ignore']
+      });
+
+      if (queueOutput && queueOutput !== 'unavailable') {
+        const lines = queueOutput.trim().split('\n');
+        
+        // Parse postqueue output
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+          if (!line || line.startsWith('-')) continue;
+          
+          // Format: ID SIZE DATE FROM TO STATUS...
+          const parts = line.split(/\s+/);
+          if (parts.length >= 5) {
+            const id = parts[0];
+            const size = parts[1];
+            const timestamp = parts.slice(2, 5).join(' ');
+            
+            // Extract sender and recipient
+            let from = '';
+            let to = '';
+            let status = '';
+            
+            for (let j = 5; j < parts.length; j++) {
+              if (parts[j].includes('@')) {
+                if (!from) from = parts[j];
+                else if (!to) to = parts[j];
+              } else {
+                status += ' ' + parts[j];
+              }
+            }
+
+            if (id && size && from) {
+              queueData.push({
+                id,
+                size: parseInt(size),
+                timestamp,
+                from,
+                to: to || 'unknown',
+                status: status.trim()
+              });
+              queueStats.total++;
+
+              if (status.includes('deferred')) queueStats.deferred++;
+              if (status.includes('active')) queueStats.active++;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[${new Date().toISOString()}] Could not read queue with postqueue:`, e.message);
+    }
+
+    res.json({
+      queue: queueData,
+      stats: queueStats,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error fetching queue:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch queue', queue: [], stats: { total: 0 } });
+  }
+});
+
 // ============================================================================
 // SERVER STARTUP & SHUTDOWN
 // ============================================================================

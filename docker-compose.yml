@@ -37,6 +37,7 @@ services:
       - NODE_ENV=production
     volumes:
       - /opt/postfix/postfix-logs:/app/logs
+      - /opt/postfix/postfix-queue:/var/spool/postfix
       - smtplog-data:/app/data
     ports:
       - "3000:3000"

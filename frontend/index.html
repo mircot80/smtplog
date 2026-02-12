@@ -402,6 +402,7 @@
             <button class="tab-button active" onclick="switchTab('logs')">Tutti i Log</button>
             <button class="tab-button" onclick="switchTab('emails')">Email Elaborate</button>
             <button class="tab-button" onclick="switchTab('charts')">📊 Grafici</button>
+            <button class="tab-button" onclick="switchTab('queue')">📬 Coda Postfix</button>
         </div>
 
         <!-- TAB 1: Tutti i Log -->
@@ -579,6 +580,45 @@
                 <canvas id="emailChart"></canvas>
             </div>
         </div>
+
+        <!-- TAB 4: Coda Postfix -->
+        <div id="queue" class="tab-content">
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button onclick="loadQueue()" style="padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">🔄 Aggiorna</button>
+                    <div id="queueStats" style="display: flex; gap: 15px; align-items: center;">
+                        <span id="queueTotal" style="font-weight: 600;">Total: 0</span>
+                        <span id="queueDeferred" style="color: #f39c12; font-weight: 600;">Deferred: 0</span>
+                        <span id="queueActive" style="color: #e74c3c; font-weight: 600;">Active: 0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="queueLoadingContainer" class="loading" style="display: none;">
+                Caricamento coda...
+            </div>
+
+            <div class="table-wrapper">
+                <table id="queueTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Mittente</th>
+                            <th>Destinatario</th>
+                            <th>Dimensione</th>
+                            <th>Timestamp</th>
+                            <th>Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody id="queueTableBody">
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="text-align: center; padding: 20px; color: #999;">
+                <p>La coda viene aggiornata in tempo reale. Clicca su "Aggiorna" per ricaricare i dati.</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -623,6 +663,8 @@
                 searchEmails();
             } else if (tab === 'charts') {
                 updateChart();
+            } else if (tab === 'queue') {
+                loadQueue();
             }
         }
 
@@ -1011,6 +1053,56 @@
             
             dateInput.value = currentDate.toISOString().split('T')[0];
             updateChart();
+        }
+
+        // Queue functions
+        async function loadQueue() {
+            const loadingContainer = document.getElementById('queueLoadingContainer');
+            loadingContainer.style.display = 'block';
+
+            try {
+                const response = await fetch(`${API_URL}/queue`);
+                const data = await response.json();
+
+                displayQueue(data.queue);
+                displayQueueStats(data.stats);
+            } catch (error) {
+                console.error('Errore nel caricamento della coda:', error);
+                document.getElementById('queueTableBody').innerHTML = 
+                    '<tr><td colspan="6" class="error">Errore nel caricamento della coda</td></tr>';
+            } finally {
+                loadingContainer.style.display = 'none';
+            }
+        }
+
+        function displayQueue(queue) {
+            const tbody = document.getElementById('queueTableBody');
+            
+            if (queue.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999; padding: 20px;">Nessuna email in coda 🎉</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = queue.map(email => {
+                const statusClass = email.status.includes('deferred') ? 'status-pending' :
+                                   (email.status.includes('active') ? 'status-failed' : 'status-sent');
+                return `
+                    <tr>
+                        <td><code style="font-size: 11px; background: #f5f5f5; padding: 2px 6px; border-radius: 3px;">${escapeHtml(email.id)}</code></td>
+                        <td><code>${escapeHtml(email.from)}</code></td>
+                        <td><code>${escapeHtml(email.to)}</code></td>
+                        <td>${Math.round(email.size / 1024)} KB</td>
+                        <td>${email.timestamp}</td>
+                        <td><span class="${statusClass}">${email.status || 'pending'}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function displayQueueStats(stats) {
+            document.getElementById('queueTotal').textContent = `Total: ${stats.total}`;
+            document.getElementById('queueDeferred').textContent = `Deferred: ${stats.deferred}`;
+            document.getElementById('queueActive').textContent = `Active: ${stats.active}`;
         }
 
         function drawChart(labels, data, period) {
