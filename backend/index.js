@@ -794,6 +794,134 @@ app.listen(port, () => {
 });
 
 /**
+ * GET /api/stats/chart
+ * Get email statistics for charting
+ * Query parameters:
+ *   - period: 'day', 'week', 'month', or 'year' (default: 'day')
+ *   - date: Reference date in ISO format (default: today)
+ */
+app.get('/api/stats/chart', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const period = req.query.period || 'day';
+    const referenceDate = req.query.date ? new Date(req.query.date) : new Date();
+    
+    let data = [];
+    let labels = [];
+
+    if (period === 'day') {
+      // Hourly data for the day
+      const startOfDay = new Date(referenceDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(referenceDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const [rows] = await connection.query(
+        `SELECT HOUR(log_date) as hour, COUNT(*) as count 
+         FROM emails 
+         WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
+         GROUP BY HOUR(log_date) 
+         ORDER BY hour`,
+        [startOfDay, endOfDay]
+      );
+
+      // Fill in all 24 hours even if no data
+      for (let hour = 0; hour < 24; hour++) {
+        const row = rows.find(r => r.hour === hour);
+        labels.push(`${hour.toString().padStart(2, '0')}:00`);
+        data.push(row ? row.count : 0);
+      }
+    } else if (period === 'week') {
+      // Daily data for the week (7 days before reference date)
+      const startOfWeek = new Date(referenceDate);
+      startOfWeek.setDate(startOfWeek.getDate() - 6);
+      startOfWeek.setHours(0, 0, 0, 0);
+      const endOfWeek = new Date(referenceDate);
+      endOfWeek.setHours(23, 59, 59, 999);
+
+      const [rows] = await connection.query(
+        `SELECT DATE(log_date) as day, COUNT(*) as count 
+         FROM emails 
+         WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
+         GROUP BY DATE(log_date) 
+         ORDER BY day`,
+        [startOfWeek, endOfWeek]
+      );
+
+      // Fill all 7 days
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(referenceDate);
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        const row = rows.find(r => r.day === dateStr);
+        labels.push(new Date(date).toLocaleDateString('it-IT', { weekday: 'short', month: 'short', day: 'numeric' }));
+        data.push(row ? row.count : 0);
+      }
+    } else if (period === 'month') {
+      // Daily data for the month
+      const startOfMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
+      startOfMonth.setHours(0, 0, 0, 0);
+      const endOfMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
+      endOfMonth.setHours(23, 59, 59, 999);
+
+      const [rows] = await connection.query(
+        `SELECT DATE(log_date) as day, COUNT(*) as count 
+         FROM emails 
+         WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
+         GROUP BY DATE(log_date) 
+         ORDER BY day`,
+        [startOfMonth, endOfMonth]
+      );
+
+      // Fill all days of the month
+      const daysInMonth = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), day);
+        const dateStr = date.toISOString().split('T')[0];
+        const row = rows.find(r => r.day === dateStr);
+        labels.push(day.toString());
+        data.push(row ? row.count : 0);
+      }
+    } else if (period === 'year') {
+      // Monthly data for the year
+      const startOfYear = new Date(referenceDate.getFullYear(), 0, 1);
+      startOfYear.setHours(0, 0, 0, 0);
+      const endOfYear = new Date(referenceDate.getFullYear(), 11, 31);
+      endOfYear.setHours(23, 59, 59, 999);
+
+      const [rows] = await connection.query(
+        `SELECT MONTH(log_date) as month, COUNT(*) as count 
+         FROM emails 
+         WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
+         GROUP BY MONTH(log_date) 
+         ORDER BY month`,
+        [startOfYear, endOfYear]
+      );
+
+      // Fill all 12 months
+      const months = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+      for (let month = 1; month <= 12; month++) {
+        const row = rows.find(r => r.month === month);
+        labels.push(months[month - 1]);
+        data.push(row ? row.count : 0);
+      }
+    }
+
+    await connection.release();
+
+    res.json({
+      labels,
+      data,
+      period,
+      referenceDate
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error fetching chart data:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch chart data' });
+  }
+});
+
+/**
  * Graceful shutdown
  * Close database connections and exit cleanly when receiving SIGTERM signal
  */

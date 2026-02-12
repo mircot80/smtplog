@@ -389,6 +389,7 @@
             }
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="header">
@@ -400,6 +401,7 @@
         <div class="tabs">
             <button class="tab-button active" onclick="switchTab('logs')">Tutti i Log</button>
             <button class="tab-button" onclick="switchTab('emails')">Email Elaborate</button>
+            <button class="tab-button" onclick="switchTab('charts')">📊 Grafici</button>
         </div>
 
         <!-- TAB 1: Tutti i Log -->
@@ -548,6 +550,31 @@
                 </div>
             </div>
         </div>
+
+        <!-- TAB 3: Grafici -->
+        <div id="charts" class="tab-content">
+            <div style="margin-bottom: 20px;">
+                <div style="display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
+                    <div>
+                        <label style="font-weight: 600; margin-right: 10px;">Periodo:</label>
+                        <select id="chartPeriod" onchange="updateChart()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="day">Giornaliero</option>
+                            <option value="week">Settimanale</option>
+                            <option value="month">Mensile</option>
+                            <option value="year">Annuale</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; margin-right: 10px;">Data:</label>
+                        <input type="date" id="chartDate" onchange="updateChart()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                </div>
+            </div>
+
+            <div style="position: relative; height: 400px; margin-bottom: 20px;">
+                <canvas id="emailChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -590,6 +617,8 @@
                 searchLogs();
             } else if (tab === 'emails') {
                 searchEmails();
+            } else if (tab === 'charts') {
+                updateChart();
             }
         }
 
@@ -923,10 +952,94 @@
             console.scrollTop = console.scrollHeight;
         }
 
+        // Chart functions
+        let emailChart = null;
+
+        async function updateChart() {
+            const period = document.getElementById('chartPeriod').value;
+            const date = document.getElementById('chartDate').value || new Date().toISOString().split('T')[0];
+
+            try {
+                const response = await fetch(`${API_URL}/stats/chart?period=${period}&date=${date}`);
+                const result = await response.json();
+
+                drawChart(result.labels, result.data, result.period);
+            } catch (error) {
+                console.error('Errore nel caricamento del grafico:', error);
+            }
+        }
+
+        function drawChart(labels, data, period) {
+            const ctx = document.getElementById('emailChart').getContext('2d');
+            
+            if (emailChart) {
+                emailChart.destroy();
+            }
+
+            const periodLabel = {
+                'day': 'Orarie',
+                'week': 'Giornaliere (ultimi 7 giorni)',
+                'month': 'Giornaliere (questo mese)',
+                'year': 'Mensili (questo anno)'
+            };
+
+            emailChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Email Inviate',
+                        data: data,
+                        backgroundColor: '#38ef7d',
+                        borderColor: '#11998e',
+                        borderWidth: 1,
+                        borderRadius: 4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
+                        title: {
+                            display: true,
+                            text: `Email Inviate - Visualizzazione ${periodLabel[period]}`
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Numero di Email'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: period === 'day' ? 'Ore' : (period === 'year' ? 'Mesi' : 'Giorni')
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         // Initial load
         document.addEventListener('DOMContentLoaded', () => {
             loadStats();
             searchLogs();
+
+            // Set default date for chart
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('chartDate').value = today;
+            
+            // Load initial chart
+            updateChart();
 
             // Auto-refresh stats every 30 seconds
             setInterval(loadStats, 30000);
