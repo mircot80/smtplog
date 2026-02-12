@@ -847,6 +847,34 @@
 
                 // Connect to SSE stream
                 const eventSource = new EventSource(`${API_URL}/import-logs/stream`);
+                let importCompleted = false;
+
+                // Listen for logs
+                eventSource.onmessage = (event) => {
+                    const logEntry = event.data;
+                    
+                    // Check for completion signal
+                    if (logEntry === ':::IMPORT_COMPLETE:::') {
+                        addLogLine('✅ Importazione completata!', 'success');
+                        importCompleted = true;
+                        eventSource.close();
+                        
+                        // Reload stats and logs after 1 second
+                        setTimeout(() => {
+                            loadStats();
+                            searchLogs();
+                        }, 1000);
+                    } else {
+                        addLogLine(logEntry, 'info');
+                    }
+                };
+
+                eventSource.onerror = () => {
+                    if (!importCompleted) {
+                        addLogLine('⚠️ Connessione chiusa', 'info');
+                    }
+                    eventSource.close();
+                };
 
                 // Start import
                 const response = await fetch(`${API_URL}/import-logs`, {
@@ -857,23 +885,6 @@
                 });
 
                 const data = await response.json();
-
-                // Listen for logs
-                eventSource.onmessage = (event) => {
-                    const logEntry = event.data;
-                    addLogLine(logEntry, 'info');
-                };
-
-                eventSource.onerror = () => {
-                    addLogLine('Importazione completata!', 'success');
-                    eventSource.close();
-                    
-                    // Reload stats and logs after 2 seconds
-                    setTimeout(() => {
-                        loadStats();
-                        searchLogs();
-                    }, 2000);
-                };
 
                 if (!response.ok) {
                     addLogLine('❌ Errore: ' + data.error, 'error');

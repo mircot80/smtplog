@@ -79,6 +79,22 @@ function broadcastLog(message) {
 }
 
 /**
+ * Send a completion signal to all connected SSE clients
+ */
+function broadcastComplete() {
+  sseClients.forEach(client => {
+    try {
+      client.write(`data: :::IMPORT_COMPLETE:::\n\n`);
+      // Close the connection after sending completion signal
+      setTimeout(() => client.end(), 100);
+    } catch (e) {
+      // Client connection closed
+    }
+  });
+  sseClients = [];
+}
+
+/**
  * Override console.log to broadcast logs to SSE clients
  */
 const originalConsoleLog = console.log;
@@ -462,6 +478,8 @@ async function importLogs() {
   } finally {
     await connection.release();
     importInProgress = false;
+    // Send completion signal to all SSE clients
+    broadcastComplete();
   }
 }
 
