@@ -564,9 +564,13 @@
                             <option value="year">Annuale</option>
                         </select>
                     </div>
-                    <div>
-                        <label style="font-weight: 600; margin-right: 10px;">Data:</label>
-                        <input type="date" id="chartDate" onchange="updateChart()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <button onclick="previousDate()" style="padding: 8px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">← Precedente</button>
+                        <div>
+                            <label style="font-weight: 600; margin-right: 10px;">Data:</label>
+                            <input type="date" id="chartDate" onchange="updateChart()" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <button onclick="nextDate()" style="padding: 8px 12px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">Successiva →</button>
                     </div>
                 </div>
             </div>
@@ -967,6 +971,22 @@
             } catch (error) {
                 console.error('Errore nel caricamento del grafico:', error);
             }
+        }
+
+        function previousDate() {
+            const dateInput = document.getElementById('chartDate');
+            const currentDate = new Date(dateInput.value);
+            currentDate.setDate(currentDate.getDate() - 1);
+            dateInput.value = currentDate.toISOString().split('T')[0];
+            updateChart();
+        }
+
+        function nextDate() {
+            const dateInput = document.getElementById('chartDate');
+            const currentDate = new Date(dateInput.value);
+            currentDate.setDate(currentDate.getDate() + 1);
+            dateInput.value = currentDate.toISOString().split('T')[0];
+            updateChart();
         }
 
         function drawChart(labels, data, period) {

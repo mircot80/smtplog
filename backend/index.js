@@ -840,10 +840,10 @@ app.get('/api/stats/chart', async (req, res) => {
       endOfWeek.setHours(23, 59, 59, 999);
 
       const [rows] = await connection.query(
-        `SELECT DATE(log_date) as day, COUNT(*) as count 
+        `SELECT DATE_FORMAT(log_date, '%Y-%m-%d') as day, COUNT(*) as count 
          FROM emails 
          WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
-         GROUP BY DATE(log_date) 
+         GROUP BY DATE_FORMAT(log_date, '%Y-%m-%d') 
          ORDER BY day`,
         [startOfWeek, endOfWeek]
       );
@@ -865,10 +865,10 @@ app.get('/api/stats/chart', async (req, res) => {
       endOfMonth.setHours(23, 59, 59, 999);
 
       const [rows] = await connection.query(
-        `SELECT DATE(log_date) as day, COUNT(*) as count 
+        `SELECT DATE_FORMAT(log_date, '%Y-%m-%d') as day, COUNT(*) as count 
          FROM emails 
          WHERE log_date >= ? AND log_date <= ? AND status = 'sent'
-         GROUP BY DATE(log_date) 
+         GROUP BY DATE_FORMAT(log_date, '%Y-%m-%d') 
          ORDER BY day`,
         [startOfMonth, endOfMonth]
       );
