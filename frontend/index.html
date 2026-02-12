@@ -832,8 +832,9 @@
         }
 
         async function forceImport() {
+            const button = event.target;
+            
             try {
-                const button = event.target;
                 button.disabled = true;
                 button.textContent = '⏳ Importazione in corso...';
 
@@ -859,6 +860,10 @@
                         importCompleted = true;
                         eventSource.close();
                         
+                        // Ripristina il pulsante
+                        button.disabled = false;
+                        button.textContent = '⬇️ Importa adesso';
+                        
                         // Reload stats and logs after 1 second
                         setTimeout(() => {
                             loadStats();
@@ -872,6 +877,8 @@
                 eventSource.onerror = () => {
                     if (!importCompleted) {
                         addLogLine('⚠️ Connessione chiusa', 'info');
+                        button.disabled = false;
+                        button.textContent = '⬇️ Importa adesso';
                     }
                     eventSource.close();
                 };
@@ -889,12 +896,12 @@
                 if (!response.ok) {
                     addLogLine('❌ Errore: ' + data.error, 'error');
                     eventSource.close();
+                    button.disabled = false;
+                    button.textContent = '⬇️ Importa adesso';
                 }
             } catch (error) {
                 console.error('Errore nell\'import:', error);
                 addLogLine('❌ Errore: ' + error.message, 'error');
-            } finally {
-                const button = event.target;
                 button.disabled = false;
                 button.textContent = '⬇️ Importa adesso';
             }
