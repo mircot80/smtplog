@@ -37,6 +37,7 @@ services:
       - NODE_ENV=production
     volumes:
       - /opt/postfix/postfix-logs:/app/logs
+      - smtplog-data:/app/data
     ports:
       - "3000:3000"
     depends_on:
@@ -61,6 +62,7 @@ services:
 
 volumes:
   mariadb-data:
+  smtplog-data:
 
 networks:
   smtplog-network:

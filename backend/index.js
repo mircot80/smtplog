@@ -261,8 +261,27 @@ async function importLogs() {
       return;
     }
 
+    // If file is empty, reset state and return
+    if (!fileContent.trim()) {
+      console.log(`[${new Date().toISOString()}] Log file is empty (${fileContent.length} bytes), resetting state`);
+      try {
+        const stateDir = path.dirname(STATE_FILE);
+        await fs.mkdir(stateDir, { recursive: true });
+        await fs.writeFile(STATE_FILE, JSON.stringify({
+          lineIndex: 0,
+          lastProcessed: new Date().toISOString(),
+          logsInserted: 0
+        }, null, 2));
+      } catch (e) {
+        console.error(`[${new Date().toISOString()}] Error resetting state:`, e.message);
+      }
+      return;
+    }
+
     const lines = fileContent.split('\n');
     const newLines = lines.slice(state.lineIndex || 0);
+
+    console.log(`[${new Date().toISOString()}] File has ${lines.length} total lines, state lineIndex: ${state.lineIndex || 0}, new lines to process: ${newLines.length}`);
 
     if (newLines.length === 0) {
       console.log(`[${new Date().toISOString()}] No new logs to process`);
@@ -276,7 +295,12 @@ async function importLogs() {
     // Parse and insert logs
     for (const line of newLines) {
       const parsed = parseLogLine(line);
-      if (!parsed) continue;
+      if (!parsed) {
+        if (line.trim()) {
+          console.debug(`[${new Date().toISOString()}] Failed to parse line: ${line.substring(0, 100)}`);
+        }
+        continue;
+      }
 
       try {
         // Insert into logs table
@@ -355,21 +379,6 @@ async function importLogs() {
       }
     }
 
-    // Update state file
-    try {
-      const stateDir = path.dirname(STATE_FILE);
-      await fs.mkdir(stateDir, { recursive: true });
-      await fs.writeFile(STATE_FILE, JSON.stringify({
-        lineIndex: lines.length,
-        lastProcessed: new Date().toISOString(),
-        logsInserted: insertedCount,
-        emailsInserted: emailInsertedCount,
-        parseErrors
-      }, null, 2));
-    } catch (error) {
-      console.error(`[${new Date().toISOString()}] Error updating state file:`, error.message);
-    }
-
     // Truncate log file after successful import
     try {
       if (insertedCount > 0) {
@@ -378,6 +387,22 @@ async function importLogs() {
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error truncating log file:`, error.message);
+    }
+
+    // Update state file - reset lineIndex to 0 if truncated, otherwise set to lines.length
+    try {
+      const stateDir = path.dirname(STATE_FILE);
+      await fs.mkdir(stateDir, { recursive: true });
+      const newLineIndex = insertedCount > 0 ? 0 : lines.length;
+      await fs.writeFile(STATE_FILE, JSON.stringify({
+        lineIndex: newLineIndex,
+        lastProcessed: new Date().toISOString(),
+        logsInserted: insertedCount,
+        emailsInserted: emailInsertedCount,
+        parseErrors
+      }, null, 2));
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error updating state file:`, error.message);
     }
 
     const duration = new Date() - startTime;
