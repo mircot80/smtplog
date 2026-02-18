@@ -144,6 +144,7 @@ async function initializeDatabase() {
         size INT,
         relay VARCHAR(255),
         delay DECIMAL(10, 2),
+        client_ip VARCHAR(50),
         status VARCHAR(50),
         dsn_code VARCHAR(20),
         response_text TEXT,
@@ -189,7 +190,8 @@ const REGEX_PATTERNS = {
   relay: /relay=([^\s,]+)/,
   delay: /delay=([\d.]+)/,
   dsn: /dsn=([\d.]+)/,
-  status: /status=(\w+)\s+\(([^)]*)\)/
+  status: /status=(\w+)\s+\(([^)]*)\)/,
+  clientIp: /connect from \S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]/
 };
 
 /**
@@ -255,6 +257,7 @@ function extractSmtpData(content) {
   const delayMatch = content.match(REGEX_PATTERNS.delay);
   const dsnMatch = content.match(REGEX_PATTERNS.dsn);
   const statusMatch = content.match(REGEX_PATTERNS.status);
+  const clientIpMatch = content.match(REGEX_PATTERNS.clientIp);
   
   if (toMatch) {
     emailData.to = toMatch[1] || toMatch[2];
@@ -275,6 +278,10 @@ function extractSmtpData(content) {
   if (statusMatch) {
     emailData.status = statusMatch[1];
     emailData.response = statusMatch[2];
+  }
+  
+  if (clientIpMatch) {
+    emailData.clientIp = clientIpMatch[1];
   }
   
   return emailData;
@@ -413,14 +420,15 @@ async function importLogs() {
       if (emailData.to || emailData.from) {
         try {
           await connection.execute(
-            `INSERT INTO emails (message_id, log_date, sender, recipient, size, relay, delay, status, dsn_code, response_text)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO emails (message_id, log_date, sender, recipient, size, relay, delay, client_ip, status, dsn_code, response_text)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE 
                sender = COALESCE(VALUES(sender), sender),
                recipient = COALESCE(VALUES(recipient), recipient),
                size = COALESCE(VALUES(size), size),
                relay = COALESCE(VALUES(relay), relay),
                delay = COALESCE(VALUES(delay), delay),
+               client_ip = COALESCE(VALUES(client_ip), client_ip),
                status = COALESCE(VALUES(status), status),
                dsn_code = COALESCE(VALUES(dsn_code), dsn_code),
                response_text = COALESCE(VALUES(response_text), response_text)`,
@@ -432,6 +440,7 @@ async function importLogs() {
               emailData.size || null,
               emailData.relay || null,
               emailData.delay || null,
+              emailData.clientIp || null,
               emailData.status || null,
               emailData.dsn || null,
               emailData.response || null
