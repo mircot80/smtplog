@@ -135,6 +135,34 @@ function extractEmailInfo(service, content) {
 }
 
 /**
+ * Archive old bounced/held emails
+ * Moves emails with status 'bounced' or 'held' older than 30 days to 'archived'
+ */
+async function archiveOldEmails() {
+  const connection = await pool.getConnection();
+
+  try {
+    console.log(`[${new Date().toISOString()}] Archiving old emails`);
+
+    const result = await connection.execute(
+      `UPDATE emails 
+       SET status = 'archived', updated_at = NOW()
+       WHERE status IN ('bounced', 'held') 
+       AND updated_at < NOW() - INTERVAL 30 DAY`
+    );
+
+    if (result[0].affectedRows > 0) {
+      console.log(`[${new Date().toISOString()}] Archived ${result[0].affectedRows} old emails`);
+    }
+
+  } catch (error) {
+    console.error(`Error archiving emails: ${error.message}`);
+  } finally {
+    await connection.release();
+  }
+}
+
+/**
  * Sync pending emails from Postfix queue using postqueue -p
  */
 async function syncQueueEmails() {
@@ -315,7 +343,10 @@ async function processLogs() {
               emailData.size || null,
               emailData.relay || null,
               emailData.delay || null,
-              emailData.status || null,
+       Archive old emails
+    await archiveOldEmails();
+
+    //        emailData.status || null,
               emailData.dsn || null,
               emailData.response || null
             ]

@@ -812,6 +812,7 @@ app.get('/api/queue', async (req, res) => {
   
   try {
     // Read pending emails from database (synced from queue directories)
+    // Exclude archived emails from queue view
     const [emails] = await connection.execute(
       `SELECT message_id, sender, recipient, size, log_date, status
        FROM emails 
@@ -852,6 +853,49 @@ app.get('/api/queue', async (req, res) => {
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error fetching queue:`, error.message);
     res.status(500).json({ error: 'Failed to fetch queue', queue: [], stats: { total: 0 } });
+  } finally {
+    await connection.release();
+  }
+});
+
+/**
+ * GET /api/archived
+ * Get archived emails (bounced/held older than 30 days)
+ */
+app.get('/api/archived', async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const [emails] = await connection.execute(
+      `SELECT message_id, sender, recipient, size, log_date, status, updated_at
+       FROM emails 
+       WHERE status = 'archived'
+       ORDER BY updated_at DESC
+       LIMIT 1000`
+    );
+
+    let archivedData = [];
+    
+    for (const email of emails) {
+      archivedData.push({
+        id: email.message_id,
+        size: email.size || 0,
+        timestamp: email.log_date ? email.log_date.toISOString() : new Date().toISOString(),
+        from: email.sender || 'unknown',
+        to: email.recipient || 'unknown',
+        status: email.status,
+        archivedAt: email.updated_at ? email.updated_at.toISOString() : new Date().toISOString()
+      });
+    }
+
+    res.json({
+      archived: archivedData,
+      total: archivedData.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Error fetching archived:`, error.message);
+    res.status(500).json({ error: 'Failed to fetch archived emails', archived: [], total: 0 });
   } finally {
     await connection.release();
   }
