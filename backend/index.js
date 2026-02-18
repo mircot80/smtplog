@@ -191,7 +191,8 @@ const REGEX_PATTERNS = {
   delay: /delay=([\d.]+)/,
   dsn: /dsn=([\d.]+)/,
   status: /status=(\w+)\s+\(([^)]*)\)/,
-  clientIp: /connect from \S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]/
+  clientIpSmtp: /connect from \S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]/,
+  clientIpSmtpd: /client=\S+\[(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\]/
 };
 
 /**
@@ -245,6 +246,23 @@ function extractQmgrData(content) {
 }
 
 /**
+ * Extract email data from postfix/smtpd log line
+ * @param {string} content - Log content
+ * @returns {Object} Email data object
+ */
+function extractSmtpdData(content) {
+  const emailData = {};
+  
+  const clientIpMatch = content.match(REGEX_PATTERNS.clientIpSmtpd);
+  
+  if (clientIpMatch) {
+    emailData.clientIp = clientIpMatch[1];
+  }
+  
+  return emailData;
+}
+
+/**
  * Extract email data from postfix/smtp log line
  * @param {string} content - Log content
  * @returns {Object} Email data object
@@ -257,7 +275,7 @@ function extractSmtpData(content) {
   const delayMatch = content.match(REGEX_PATTERNS.delay);
   const dsnMatch = content.match(REGEX_PATTERNS.dsn);
   const statusMatch = content.match(REGEX_PATTERNS.status);
-  const clientIpMatch = content.match(REGEX_PATTERNS.clientIp);
+  const clientIpMatch = content.match(REGEX_PATTERNS.clientIpSmtp);
   
   if (toMatch) {
     emailData.to = toMatch[1] || toMatch[2];
@@ -399,6 +417,11 @@ async function importLogs() {
             logsByMessageId[messageId].emailData = {
               ...logsByMessageId[messageId].emailData,
               ...extractQmgrData(parsed.content)
+            };
+          } else if (parsed.service === 'postfix/smtpd') {
+            logsByMessageId[messageId].emailData = {
+              ...logsByMessageId[messageId].emailData,
+              ...extractSmtpdData(parsed.content)
             };
           } else if (parsed.service === 'postfix/smtp') {
             logsByMessageId[messageId].emailData = {
