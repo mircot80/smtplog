@@ -9,7 +9,7 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
-const readline = require('readline');
+const { execSync } = require('child_process');
 
 const LOG_FILE = process.env.LOG_FILE || '/app/logs/mail.log';
 const STATE_FILE = '/app/data/log_state.json';
@@ -52,159 +52,54 @@ function parseLogLine(line) {
 }
 
 /**
- * Parse Postfix queue file for email metadata
- * Queue format: C/message_id contains sender, recipient, and other metadata
+ * Parse queue data from postqueue command output
  */
-async function parseQueueFile(messageId, queueDir) {
-  const emailInfo = {};
+function parsePostqueueOutput(output) {
+  const queueData = {};
   
-  try {
-    // Queue files are stored as C/messageId
-    const queuePath = path.join(queueDir, 'deferred', messageId[0], messageId);
+  if (!output || output.trim() === 'Mail queue is empty' || output.trim() === 'unavailable') {
+    return queueData;
+  }
+  
+  const lines = output.trim().split('\n');
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('-') || line.startsWith('Mail')) continue;
     
-    // Try to read the message file
-    try {
-      const fileContent = await fs.readFile(queuePath, 'utf-8');
+    // Parse postqueue line: ID SIZE DATE FROM TO STATUS...
+    const parts = line.split(/\s+/);
+    if (parts.length >= 5 && /^[A-F0-9]+$/.test(parts[0])) {
+      const id = parts[0];
+      const size = parts[1];
       
-      // Extract sender (starts with !)
-      const senderMatch = fileContent.match(/^!([^\n]*?)[\r\n]/m);
-      if (senderMatch) {
-        emailInfo.from = senderMatch[1].trim();
+      // Extract sender and recipient (they have @)
+      let from = '';
+      let to = '';
+      let status = '';
+      
+      for (let j = 5; j < parts.length; j++) {
+        if (parts[j].includes('@')) {
+          if (!from) from = parts[j];
+          else if (!to) to = parts[j];
+        } else {
+          status += ' ' + parts[j];
+        }
       }
       
-      // Extract recipients (starts with @)
-      const recipientMatches = fileContent.match(/^@[^\n]*?\n([^\n]*?)[\r\n]/gm);
-      if (recipientMatches && recipientMatches.length > 0) {
-        // Get first recipient
-        const match = recipientMatches[0].match(/^@[^\n]*?\n([^\n]*?)[\r\n]/);
-        if (match) {
-          emailInfo.to = match[1].trim();
-        }
-      }
-    } catch (e) {
-      // File not readable, try defer directory
-      const deferPath = path.join(queueDir, 'defer', messageId[0], messageId);
-   Sync pending emails from Postfix queue directories
- */
-async function syncQueueEmails() {
-  const connection = await pool.getConnection();
-
-  try {
-    console.log(`[${new Date().toISOString()}] Syncing queue emails from ${QUEUE_DIR}`);
-
-    const queueDirs = ['deferred', 'defer', 'bounce', 'hold'];
-    const statusMap = {
-      'deferred': 'deferred',
-      'defer': 'deferred',
-      'bounce': 'bounced',
-      'hold': 'held'
-    };
-
-    for (const queueType of queueDirs) {
-      const queuePath = path.join(QUEUE_DIR, queueType);
-
-      try {
-        // Read subdirectories (first letter of message ID)
-        const entries = await fs.readdir(queuePath, { withFileTypes: true });
-
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          
-          const subDir = path.join(queuePath, entry.name);
-          const files = await fs.readdir(subDir);
-
-          for (const file of files) {
-            // Message IDs are uppercase hex
-            if (!/^[A-F0-9]+$/.test(file)) continue;
-
-            const messageId = file;
-
-            try {
-              // Check if already in database
-              const [existing] = await connection.execute(
-                'SELECT message_id FROM emails WHERE message_id = ?',
-                [messageId]
-              );
-
-              if (existing.length > 0) {
-                // Already in DB, update status if needed
-                await connection.execute(
-                  `UPDATE emails SET status = ?, updated_at = NOW() 
-                   WHERE message_id = ? AND status != ?`,
-                  [statusMap[queueType], messageId, statusMap[queueType]]
-                );
-              } else {
-                // New email in queue, try to extract metadata
-                const emailInfo = await parseQueueFile(messageId, QUEUE_DIR);
-
-                if (emailInfo.from || emailInfo.to) {
-                  // Get file modification time
-                  const fileStats = await fs.stat(path.join(subDir, file));
-                  const logDate = new Date(fileStats.mtime);
-
-                  await connection.execute(
-                    `INSERT INTO emails (message_id, log_date, sender, recipient, status)
-                     VALUES (?, ?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE 
-                       status = VALUES(status),
-                       updated_at = NOW()`,
-                    [
-                      messageId,
-                      logDate,
-                      emailInfo.from || null,
-                      emailInfo.to || null,
-                      statusMap[queueType]
-                    ]
-                  );
-                }
-              }
-            } catch (e) {
-              console.error(`Error processing queue file ${messageId}: ${e.message}`);
-            }
-          }
-        }
-      } catch (e) {
-        // Queue directory might not exist
-        if (e.code !== 'ENOENT') {
-          console.error(`Error reading queue directory ${queueType}: ${e.message}`);
-        }
+      if (id && size && from) {
+        queueData[id] = {
+          id,
+          size: parseInt(size),
+          from,
+          to: to || 'unknown',
+          status: status.trim()
+        };
       }
     }
-
-    console.log(`[${new Date().toISOString()}] Queue sync completed`);
-
-  } catch (error) {
-    console.error(`Error syncing queue emails: ${error.message}`, error);
-  } finally {
-    await connection.release();
-  }
-}
-
-/**
- *    try {
-        const fileContent = await fs.readFile(deferPath, 'utf-8');
-        
-        const senderMatch = fileContent.match(/^!([^\n]*?)[\r\n]/m);
-        if (senderMatch) {
-          emailInfo.from = senderMatch[1].trim();
-        }
-        
-        const recipientMatches = fileContent.match(/^@[^\n]*?\n([^\n]*?)[\r\n]/gm);
-        if (recipientMatches && recipientMatches.length > 0) {
-          const match = recipientMatches[0].match(/^@[^\n]*?\n([^\n]*?)[\r\n]/);
-          if (match) {
-            emailInfo.to = match[1].trim();
-          }
-        }
-      } catch (e2) {
-        // Cannot read queue file
-      }
-    }
-  } catch (err) {
-    // Error parsing queue file
   }
   
-  return emailInfo;
+  return queueData;
 }
 
 /**
@@ -240,6 +135,82 @@ function extractEmailInfo(service, content) {
 }
 
 /**
+ * Sync pending emails from Postfix queue using postqueue -p
+ */
+async function syncQueueEmails() {
+  const connection = await pool.getConnection();
+
+  try {
+    console.log(`[${new Date().toISOString()}] Syncing queue emails from postfix`);
+
+    let queueData = {};
+
+    try {
+      // Try to execute postqueue -p
+      const queueOutput = execSync('postqueue -p 2>/dev/null || echo "unavailable"', { 
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'ignore']
+      });
+
+      queueData = parsePostqueueOutput(queueOutput);
+    } catch (e) {
+      console.warn(`[${new Date().toISOString()}] Could not read queue with postqueue: ${e.message}`);
+      // Continue anyway - queue sync is optional
+      return;
+    }
+
+    // Process each queue entry
+    for (const [messageId, queueEntry] of Object.entries(queueData)) {
+      try {
+        // Check if already in database
+        const [existing] = await connection.execute(
+          'SELECT message_id FROM emails WHERE message_id = ?',
+          [messageId]
+        );
+
+        const now = new Date();
+
+        if (existing.length > 0) {
+          // Already in DB, update status if needed
+          await connection.execute(
+            `UPDATE emails SET status = ?, updated_at = NOW() 
+             WHERE message_id = ?`,
+            [queueEntry.status, messageId]
+          );
+        } else {
+          // New email in queue
+          await connection.execute(
+            `INSERT INTO emails (message_id, log_date, sender, recipient, size, status)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE 
+               status = VALUES(status),
+               updated_at = NOW()`,
+            [
+              messageId,
+              now,
+              queueEntry.from || null,
+              queueEntry.to || null,
+              queueEntry.size || null,
+              queueEntry.status
+            ]
+          );
+        }
+      } catch (e) {
+        console.error(`Error processing queue entry ${messageId}: ${e.message}`);
+      }
+    }
+
+    console.log(`[${new Date().toISOString()}] Queue sync completed (${Object.keys(queueData).length} entries)`);
+
+  } catch (error) {
+    console.error(`Error syncing queue emails: ${error.message}`);
+  } finally {
+    await connection.release();
+  }
+}
+
+/**
  * Process log file and insert into database
  */
 async function processLogs() {
@@ -272,10 +243,7 @@ async function processLogs() {
 
     // Parse all lines
     for (const line of newLines) {
-      iSync queue emails
-    await syncQueueEmails();
-
-    // f (!line.trim()) continue;
+      if (!line.trim()) continue;
 
       const parsed = parseLogLine(line);
       if (!parsed) continue;
@@ -371,6 +339,9 @@ async function processLogs() {
     await fs.writeFile(STATE_FILE, JSON.stringify(newState, null, 2));
 
     console.log(`[${new Date().toISOString()}] Imported ${newLines.length} log entries`);
+
+    // Sync queue emails after importing logs
+    await syncQueueEmails();
 
     // Clear processed logs if requested
     if (process.env.CLEAR_LOGS === 'true') {

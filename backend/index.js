@@ -805,77 +805,43 @@ app.get('/api/health', (req, res) => {
 
 /**
  * GET /api/queue
- * Get Postfix queue information
+ * Get Postfix queue information from database
  */
 app.get('/api/queue', async (req, res) => {
+  const connection = await pool.getConnection();
+  
   try {
-    const { execSync } = require('child_process');
-    
-    // Try to read queue using postqueue command (works if Postfix is accessible)
+    // Read pending emails from database (synced from queue directories)
+    const [emails] = await connection.execute(
+      `SELECT message_id, sender, recipient, size, log_date, status
+       FROM emails 
+       WHERE status IN ('deferred', 'bounced', 'held')
+       ORDER BY log_date DESC
+       LIMIT 1000`
+    );
+
     let queueData = [];
     let queueStats = {
       total: 0,
       deferred: 0,
-      active: 0,
-      maildir: 0
+      bounced: 0,
+      held: 0
     };
 
-    try {
-      // Try to execute postqueue -p
-      const queueOutput = execSync('postqueue -p 2>/dev/null || echo "unavailable"', { 
-        encoding: 'utf-8',
-        timeout: 5000,
-        stdio: ['pipe', 'pipe', 'ignore']
+    for (const email of emails) {
+      queueData.push({
+        id: email.message_id,
+        size: email.size || 0,
+        timestamp: email.log_date ? email.log_date.toISOString() : new Date().toISOString(),
+        from: email.sender || 'unknown',
+        to: email.recipient || 'unknown',
+        status: email.status
       });
+      queueStats.total++;
 
-      if (queueOutput && queueOutput !== 'unavailable') {
-        const lines = queueOutput.trim().split('\n');
-        
-        // Parse postqueue output
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i].trim();
-          if (!line || line.startsWith('-')) continue;
-          
-          // Format: ID SIZE DATE FROM TO STATUS...
-          const parts = line.split(/\s+/);
-          if (parts.length >= 5) {
-            const id = parts[0];
-            const size = parts[1];
-            const timestamp = parts.slice(2, 5).join(' ');
-            
-            // Extract sender and recipient
-            let from = '';
-            let to = '';
-            let status = '';
-            
-            for (let j = 5; j < parts.length; j++) {
-              if (parts[j].includes('@')) {
-                if (!from) from = parts[j];
-                else if (!to) to = parts[j];
-              } else {
-                status += ' ' + parts[j];
-              }
-            }
-
-            if (id && size && from) {
-              queueData.push({
-                id,
-                size: parseInt(size),
-                timestamp,
-                from,
-                to: to || 'unknown',
-                status: status.trim()
-              });
-              queueStats.total++;
-
-              if (status.includes('deferred')) queueStats.deferred++;
-              if (status.includes('active')) queueStats.active++;
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[${new Date().toISOString()}] Could not read queue with postqueue:`, e.message);
+      if (email.status === 'deferred') queueStats.deferred++;
+      if (email.status === 'bounced') queueStats.bounced++;
+      if (email.status === 'held') queueStats.held++;
     }
 
     res.json({
@@ -886,6 +852,8 @@ app.get('/api/queue', async (req, res) => {
   } catch (error) {
     console.error(`[${new Date().toISOString()}] Error fetching queue:`, error.message);
     res.status(500).json({ error: 'Failed to fetch queue', queue: [], stats: { total: 0 } });
+  } finally {
+    await connection.release();
   }
 });
 
