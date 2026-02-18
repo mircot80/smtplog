@@ -156,6 +156,11 @@ async function initializeDatabase() {
       )
     `);
 
+    // Add client_ip column if it doesn't exist
+    await connection.execute(`
+      ALTER TABLE emails ADD COLUMN IF NOT EXISTS client_ip VARCHAR(50)
+    `);
+
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS processed_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
