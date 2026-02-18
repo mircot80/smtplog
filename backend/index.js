@@ -161,6 +161,11 @@ async function initializeDatabase() {
       ALTER TABLE emails ADD COLUMN IF NOT EXISTS client_ip VARCHAR(50)
     `);
 
+    // Add updated_at column if it doesn't exist
+    await connection.execute(`
+      ALTER TABLE emails ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    `);
+
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS processed_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
