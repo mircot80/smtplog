@@ -621,9 +621,11 @@
                     <thead>
                         <tr>
                             <th>Data/Ora</th>
+                            <th>IP</th>
                             <th>Mittente</th>
                             <th>Destinatario</th>
                             <th>Relè</th>
+                            <th>Dimensione</th>
                             <th>Ritardo</th>
                             <th>Stato</th>
                         </tr>
@@ -959,7 +961,7 @@
             const tbody = document.getElementById('emailsTableBody');
             
             if (emails.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">Nessun risultato trovato</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #999;">Nessun risultato trovato</td></tr>';
                 return;
             }
 
@@ -967,13 +969,16 @@
                 const statusClass = email.status === 'sent' ? 'status-sent' : 
                                    (email.status ? 'status-failed' : 'status-pending');
                 const statusText = email.status || 'In sospeso';
+                const sizeKb = email.size ? (email.size / 1024).toFixed(2) : '-';
                 
                 return `
                     <tr>
                         <td>${formatDate(email.log_date)}</td>
+                        <td><code>${escapeHtml(email.client_ip || '-')}</code></td>
                         <td><code>${escapeHtml(email.sender || '-')}</code></td>
                         <td><code>${escapeHtml(email.recipient || '-')}</code></td>
                         <td>${email.relay || '-'}</td>
+                        <td>${sizeKb !== '-' ? sizeKb + ' KB' : '-'}</td>
                         <td>${email.delay ? email.delay + 's' : '-'}</td>
                         <td><span class="${statusClass}">${statusText}</span></td>
                     </tr>
