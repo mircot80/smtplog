@@ -871,7 +871,7 @@
                 <tr>
                     <td>${formatDate(log.log_date)}</td>
                     <td><code>${escapeHtml(log.service)}</code></td>
-                    <td style="cursor: pointer; color: #3498db; text-decoration: underline;" onclick="expandMessage('${escapeHtml(log.content).replace(/'/g, "\\'")}")">${escapeHtml(truncateText(log.content, 200))}</td>
+                    <td style="cursor: pointer; color: #3498db; text-decoration: underline;" data-message="${escapeHtml(log.content)}" onclick="expandMessage(this.dataset.message)">${escapeHtml(truncateText(log.content, 200))}</td>
                 </tr>
             `).join('');
         }
